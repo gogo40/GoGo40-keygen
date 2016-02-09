@@ -77,10 +77,10 @@ void KeyGen::save_private_key(std::ostream& out, const CryptoPP::PrivateKey& pri
     save(out, queue);
 }
 
-void KeyGen::generate_keys(std::ostream& pub_out, std::ostream& pri_out)
+void KeyGen::generate_keys(std::ostream& pub_out, std::ostream& pri_out, int key_size)
 {
     CryptoPP::InvertibleRSAFunction parameters;
-    parameters.GenerateRandomWithKeySize(rng, 4096);
+    parameters.GenerateRandomWithKeySize(rng, key_size);
 
     CryptoPP::RSA::PrivateKey pri_key(parameters);
     CryptoPP::RSA::PublicKey pub_key(parameters);

@@ -42,7 +42,7 @@ public:
     static void load_private_key(std::istream& in, CryptoPP::PrivateKey& pri_key);
     static void save_private_key(std::ostream& out, const CryptoPP::PrivateKey& pri_key);
 
-    void generate_keys(std::ostream& pub_out, std::ostream& pri_out);
+    void generate_keys(std::ostream& pub_out, std::ostream& pri_out, int key_size);
 
     void encrypt(const CryptoPP::PublicKey& pub_key, const std::string& message, std::string& cipher);
     void decrypt(const CryptoPP::PrivateKey& pri_key, const std::string& cipher, std::string& message);
