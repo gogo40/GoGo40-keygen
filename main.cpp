@@ -17,15 +17,10 @@
 
 #include "keygen_widget.h"
 
-#include "tests.h"
-
 #include <QApplication>
 
 int main(int argc, char *argv[])
 {
-    run_test1();
-    return 0;
-
     QApplication a(argc, argv);
     KeyGen w;
     w.show();
