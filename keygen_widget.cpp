@@ -201,6 +201,7 @@ void KeyGen::on_get_private_key_clicked()
 
 void KeyGen::on_test_license_clicked()
 {
+    ui->test_license_log->clear();
     QString qlic_file = ui->license_file->text();
     QString qpri_file = ui->private_key->text();
 
