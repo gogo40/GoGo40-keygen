@@ -21,6 +21,7 @@
 #include <QMainWindow>
 #include <QThread>
 #include <functional>
+#include <QDebug>
 #include "keygen.h"
 
 namespace Ui {
@@ -33,24 +34,26 @@ public:
     using StdJob = std::function<void()>;
 
     StdWorker(StdJob _job) : QObject(0), job(_job), thread() {
-        connect(&thread, SIGNAL(started()), this, SLOT(process()), Qt::QueuedConnection);
-        connect(this, SIGNAL(finished()), this, SLOT(deleteLater()), Qt::QueuedConnection);
+        connect(&thread, SIGNAL(started()), this, SLOT(process()));
+        connect(&thread, SIGNAL(finished()), this, SLOT(deleteLater()));
 
         this->moveToThread(&thread);
     }
 
-    virtual ~StdWorker() {}
+    virtual ~StdWorker() {
+        qDebug() << "delete stdWorker...\n";
+    }
 
     void start() {
         thread.start();
-        emit finished();
     }
+
 
 private slots:
     void process() {
         job();
-        emit finished();
     }
+
 
 signals:
     void finished();
