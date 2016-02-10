@@ -27,6 +27,7 @@
 #include <cryptopp/cryptlib.h>
 #include <cryptopp/base64.h>
 
+
 namespace gogo40_keygen {
 
 void KeyGen::load(std::istream& in, CryptoPP::BufferedTransformation& bt)
@@ -126,15 +127,15 @@ void save_message(std::ostream &out, const std::string &message)
                                )
                            );
 
-    out << encoded << "\n";
+    out << encoded;
 }
 
 void load_message(std::istream &in, std::string &message)
 {
-    std::string input;
-    std::string line;
+    std::string input = "";
+    std::string line = "";
 
-    while (in >> line) {
+    while (std::getline(in, line)) {
         input += line;
     }
 

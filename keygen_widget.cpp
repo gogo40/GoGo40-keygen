@@ -92,6 +92,12 @@ void KeyGen::on_generate_license_clicked()
 
     if (message_file == "") return;
 
+    QStringList l = message_file.split(".");
+    int s = l.size() - 1;
+    if (l[s] != "crt") {
+        message_file += ".crt";
+    }
+
     ui->log->clear();
 
     if (!pub_key_is_loaded) {
@@ -208,31 +214,37 @@ void KeyGen::on_test_license_clicked()
     std::string license_file = qlic_file.toStdString();
     std::string pri_key_file = qpri_file.toStdString();
 
-    std::ifstream pri_in(pri_key_file.c_str());
-    if (!pri_in.is_open()) {
-        ui->test_license_log->append("[key-gen-widget] Arquivo de chave privada " + qpri_file + " não é válido.");
-        return;
-    }
-
-    std::ifstream lic_in(license_file.c_str());
-    if (!lic_in.is_open()) {
-        ui->test_license_log->append("[key-gen-widget] Arquivo de licença " + qlic_file + " não é válido.");
-        return;
-    }
-
     gogo40_keygen::KeyGen key_gen;
     CryptoPP::RSA::PrivateKey pri_key;
 
-    std::string cipher;
-    std::string message;
+    std::string cipher = "";
+    std::string message = "";
 
     try {
+        std::string input = "";
+        std::string line = "";
 
-        key_gen.load_private_key(pri_in, pri_key);
+        {
+            std::ifstream lic_in(license_file.c_str());
+            if (!lic_in.is_open()) {
+                ui->test_license_log->append("[key-gen-widget] Arquivo de licença " + qlic_file + " não é válido.");
+                return;
+            }
+            gogo40_keygen::load_message(lic_in, cipher);
+            message = cipher;
+        }
 
-        gogo40_keygen::load_message(lic_in, cipher);
+        {
+            std::ifstream pri_in(pri_key_file.c_str());
+            if (!pri_in.is_open()) {
+                ui->test_license_log->append("[key-gen-widget] Arquivo de chave privada " + qpri_file + " não é válido.");
+                return;
+            }
 
-        key_gen.decrypt(pri_key, cipher, message);
+            key_gen.load_private_key(pri_in, pri_key);
+        }
+
+        //key_gen.decrypt(pri_key, cipher, message);
 
         ui->test_license_log->append("[key-gen-widget] Licença desencriptada: " + QString(message.c_str()));
     } catch( CryptoPP::Exception& e ) {
