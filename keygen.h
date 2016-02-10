@@ -18,7 +18,6 @@
 #ifndef __KEYGEN_H__
 #define __KEYGEN_H__
 
-#include <cryptopp/dll.h>
 #include <string>
 #include <cryptopp/cryptlib.h>
 #include <cryptopp/osrng.h>
