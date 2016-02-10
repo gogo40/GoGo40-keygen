@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <thread>
+#include <sstream>
 
 KeyGen::KeyGen(QWidget *parent) :
     QMainWindow(parent),
@@ -48,7 +49,24 @@ KeyGen::~KeyGen()
     delete ui;
 }
 
-bool KeyGen::load_pub_key(QString pub_key_file)
+bool KeyGen::read_all_data(std::string& buffer, const QString& file_name)
+{
+    QFile file(file_name);
+
+    file.open(QIODevice::ReadOnly);
+
+    if (file.isOpen()) {
+        QByteArray data = std::move(file.readAll());
+        buffer = std::move(data.toStdString());
+        file.close();
+        return true;
+    }
+
+
+    return false;
+}
+
+bool KeyGen::load_pub_key(const QString& pub_key_file)
 {
     ui->pub_key_file->setText(pub_key_file);
 
@@ -57,10 +75,12 @@ bool KeyGen::load_pub_key(QString pub_key_file)
     ui->log->clear();
 
     try {
-        std::string file_name = pub_key_file.toStdString();
-        std::ifstream pub_in(file_name.c_str(), std::ios_base::binary);
+        std::string buffer;
 
-        if (pub_in.is_open()) {
+        if (read_all_data(buffer, pub_key_file)) {
+
+            std::stringstream pub_in(buffer, std::ios_base::in);
+
             ui->log->append("[key-gen-widget] Carregando chave pública: " + pub_key_file);
             gogo40_keygen::KeyGen::load_public_key(pub_in, pub_key);
             pub_key_is_loaded = true;
@@ -83,6 +103,15 @@ void KeyGen::on_get_pub_key_clicked()
     if (pub_key_file == "") return;
 
     load_pub_key(pub_key_file);
+}
+
+void KeyGen::save_stream(std::ostringstream& out, const QString& message_file)
+{
+    QFile file_out(message_file);
+    file_out.open(QIODevice::WriteOnly);
+    std::string buffer = std::move(out.str());
+    file_out.write(buffer.c_str(), buffer.size());
+    file_out.close();
 }
 
 void KeyGen::on_generate_license_clicked()
@@ -144,26 +173,22 @@ void KeyGen::on_generate_license_clicked()
     key_gen.encrypt(pub_key, std_json, cipher);
 
     {
-        std::string file_name = message_file.toStdString();
-        std::ofstream out(file_name.c_str(), std::ios_base::binary);
+        std::ostringstream out(std::ios_base::binary | std::ios_base::out);
         gogo40_keygen::save_message(out, cipher);
+
+        save_stream(out, message_file);
     }
 
-    std::string output;
-    {
-        std::string file_name = message_file.toStdString();
-        std::ifstream in(file_name.c_str());
-        std::string line;
-        while (in >> line) {
-            output += line;
-        }
+    std::string output = "";
+    if (!read_all_data(output, message_file)) {
+        ui->log->append("[key-gen-widget] Certificado foi corrompido!");
+    } else {
+        ui->log->append("[key-gen-widget] Licença:\n" + doc.toJson());
+        ui->log->append("[key-gen-widget] Licença encriptada:\n" + QString(output.c_str()));
+        ui->log->append("[key-gen-widget] O arquivo de licença foi salvo em: " + message_file);
+
+        ui->license_file->setText(message_file);
     }
-
-    ui->log->append("[key-gen-widget] Licença:\n" + doc.toJson());
-    ui->log->append("[key-gen-widget] Licença encriptada:\n" + QString(output.c_str()));
-    ui->log->append("[key-gen-widget] O arquivo de licença foi salvo em: " + message_file);
-
-    ui->license_file->setText(message_file);
 }
 
 void KeyGen::on_generate_pub_key_clicked()
@@ -173,11 +198,8 @@ void KeyGen::on_generate_pub_key_clicked()
 
     if (base_name == "") return;
 
-    QString qpub_key = base_name + ".pub";
-    QString qpri_key = base_name + ".pri";
-
-    std::string pub_key_file = qpub_key.toStdString();
-    std::string pri_key_file = qpri_key.toStdString();
+    QString pub_key_file = base_name + ".pub";
+    QString pri_key_file = base_name + ".pri";
 
     ui->log->clear();
 
@@ -186,22 +208,26 @@ void KeyGen::on_generate_pub_key_clicked()
     int key_size = ui->key_size->value();
 
     ui->generate_pub_key->setEnabled(false);
+
     auto job = [=](){
         gogo40_keygen::KeyGen key_gen;
-        std::ofstream pub_out(pub_key_file, std::ios_base::binary | std::ios_base::trunc);
-        std::ofstream pri_out(pri_key_file, std::ios_base::binary | std::ios_base::trunc);
+        std::ostringstream pub_out(std::ios_base::binary | std::ios_base::trunc);
+        std::ostringstream pri_out(std::ios_base::binary | std::ios_base::trunc);
 
         key_gen.generate_keys(pub_out, pri_out, key_size);
 
+        save_stream(pub_out, pub_key_file);
+        save_stream(pri_out, pri_key_file);
 
         emit message("[key-gen-widget] Chaves gravadas nos arquivos:" +
-                     qpub_key + " e " + qpri_key);
+                     pub_key_file + " e " + pri_key_file);
         emit enableGenKeys(true);
     };
 
     (new StdWorker(job))->start();
-    ui->pub_key_file->setText(qpub_key);
-    ui->private_key->setText(qpri_key);
+
+    ui->pub_key_file->setText(pub_key_file);
+    ui->private_key->setText(pri_key_file);
 }
 
 void KeyGen::on_get_license_file_clicked()
@@ -229,38 +255,46 @@ void KeyGen::on_get_private_key_clicked()
 void KeyGen::on_test_license_clicked()
 {
     ui->test_license_log->clear();
-    QString qlic_file = ui->license_file->text();
-    QString qpri_file = ui->private_key->text();
-
-    std::string license_file = qlic_file.toStdString();
-    std::string pri_key_file = qpri_file.toStdString();
+    QString license_file = ui->license_file->text();
+    QString private_key_file = ui->private_key->text();
 
     gogo40_keygen::KeyGen key_gen;
     CryptoPP::RSA::PrivateKey pri_key;
 
-    std::string cipher = "";
-    std::string message = "";
+
 
     try {
-        std::string input = "";
-        std::string line = "";
+
+        std::string cipher = "";
+        std::string message = "";
 
         {
-            std::ifstream lic_in(license_file.c_str());
-            if (!lic_in.is_open()) {
-                ui->test_license_log->append("[key-gen-widget] Arquivo de licença " + qlic_file + " não é válido.");
+            std::string input = "";
+            bool ok = read_all_data(input, license_file);
+
+            if (!ok) {
+                ui->test_license_log->append("[key-gen-widget] Arquivo de licença " +
+                                             license_file +
+                                             " não é válido.");
                 return;
             }
+
+            std::istringstream lic_in(input, std::ios_base::binary | std::ios_base::in);
             gogo40_keygen::load_message(lic_in, cipher);
         }
 
         {
-            std::ifstream pri_in(pri_key_file.c_str(), std::ios_base::binary);
-            if (!pri_in.is_open()) {
-                ui->test_license_log->append("[key-gen-widget] Arquivo de chave privada " + qpri_file + " não é válido.");
+            std::string input = "";
+            bool ok = read_all_data(input, private_key_file);
+
+            if (!ok) {
+                ui->test_license_log->append("[key-gen-widget] Arquivo de chave privada " +
+                                             private_key_file +
+                                             " não é válido.");
                 return;
             }
 
+            std::istringstream pri_in(input, std::ios_base::binary | std::ios_base::in);
             key_gen.load_private_key(pri_in, pri_key);
         }
 

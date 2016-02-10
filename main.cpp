@@ -18,10 +18,17 @@
 #include "keygen_widget.h"
 
 #include <QApplication>
+#include <QTextCodec>
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+
+    QLocale loc = QLocale::system(); // current locale
+    loc.setNumberOptions(QLocale::c().numberOptions()); // borrow number options from the "C" locale
+    QLocale::setDefault(loc);
+    QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
+
     KeyGen w;
     w.show();
 

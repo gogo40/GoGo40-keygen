@@ -21,6 +21,7 @@
 #include <QMainWindow>
 #include <QThread>
 #include <functional>
+#include <QFile>
 #include <QDebug>
 #include "keygen.h"
 
@@ -94,7 +95,9 @@ private:
     CryptoPP::RSA::PublicKey pub_key;
 
     bool pub_key_is_loaded;
-    bool load_pub_key(QString pub_key_file);
+    bool load_pub_key(const QString& pub_key_file);
+    bool read_all_data(std::string& buffer, const QString& file_name);
+    void save_stream(std::ostringstream& out, const QString& message_file);
 };
 
 #endif // KEYGEN_WIDGET_H
