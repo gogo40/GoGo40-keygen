@@ -162,6 +162,8 @@ void KeyGen::on_generate_license_clicked()
     ui->log->append("[key-gen-widget] Licença:\n" + doc.toJson());
     ui->log->append("[key-gen-widget] Licença encriptada:\n" + QString(output.c_str()));
     ui->log->append("[key-gen-widget] O arquivo de licença foi salvo em: " + message_file);
+
+    ui->license_file->setText(message_file);
 }
 
 void KeyGen::on_generate_pub_key_clicked()
@@ -198,6 +200,8 @@ void KeyGen::on_generate_pub_key_clicked()
     };
 
     (new StdWorker(job))->start();
+    ui->pub_key_file->setText(qpub_key);
+    ui->private_key->setText(qpri_key);
 }
 
 void KeyGen::on_get_license_file_clicked()
