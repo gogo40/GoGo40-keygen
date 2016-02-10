@@ -32,9 +32,15 @@ KeyGen::KeyGen(QWidget *parent) :
     ui->setupUi(this);
 
     QObject::connect(this, SIGNAL(message(QString)),
-                     ui->log, SLOT(append(QString)));
-    QObject::connect(this, SIGNAL(enableGenKeys(bool)),
-                     ui->generate_pub_key, SLOT(setEnabled(bool)));
+                     ui->log,
+                     SLOT(append(QString)),
+                     Qt::QueuedConnection
+                     );
+    QObject::connect(this,
+                     SIGNAL(enableGenKeys(bool)),
+                     ui->generate_pub_key,
+                     SLOT(setEnabled(bool)),
+                     Qt::QueuedConnection);
 }
 
 KeyGen::~KeyGen()
@@ -52,7 +58,7 @@ bool KeyGen::load_pub_key(QString pub_key_file)
 
     try {
         std::string file_name = pub_key_file.toStdString();
-        std::ifstream pub_in(file_name.c_str());
+        std::ifstream pub_in(file_name.c_str(), std::ios_base::binary);
 
         if (pub_in.is_open()) {
             ui->log->append("[key-gen-widget] Carregando chave pública: " + pub_key_file);
@@ -139,7 +145,7 @@ void KeyGen::on_generate_license_clicked()
 
     {
         std::string file_name = message_file.toStdString();
-        std::ofstream out(file_name.c_str());
+        std::ofstream out(file_name.c_str(), std::ios_base::binary);
         gogo40_keygen::save_message(out, cipher);
     }
 
@@ -160,6 +166,17 @@ void KeyGen::on_generate_license_clicked()
 
 void KeyGen::on_generate_pub_key_clicked()
 {
+    QString base_name = QFileDialog::getSaveFileName(this, "Nome base para salvar as chaves",
+                                                     QDir::currentPath());
+
+    if (base_name == "") return;
+
+    QString qpub_key = base_name + ".pub";
+    QString qpri_key = base_name + ".pri";
+
+    std::string pub_key_file = qpub_key.toStdString();
+    std::string pri_key_file = qpri_key.toStdString();
+
     ui->log->clear();
 
     ui->log->append("[key-gen-widget] Gerando chaves...");
@@ -169,14 +186,14 @@ void KeyGen::on_generate_pub_key_clicked()
     ui->generate_pub_key->setEnabled(false);
     auto job = [=](){
         gogo40_keygen::KeyGen key_gen;
-        std::ofstream pub_out("my_key.pub");
-        std::ofstream pri_out("my_key.pri");
+        std::ofstream pub_out(pub_key_file, std::ios_base::binary | std::ios_base::trunc);
+        std::ofstream pri_out(pri_key_file, std::ios_base::binary | std::ios_base::trunc);
 
         key_gen.generate_keys(pub_out, pri_out, key_size);
 
 
-        emit message("[key-gen-widget] Chaves gravadas nos arquivos:"
-                     " 'my_key.pub'' e 'my_key.pri'");
+        emit message("[key-gen-widget] Chaves gravadas nos arquivos:" +
+                     qpub_key + " e " + qpri_key);
         emit enableGenKeys(true);
     };
 
@@ -231,11 +248,10 @@ void KeyGen::on_test_license_clicked()
                 return;
             }
             gogo40_keygen::load_message(lic_in, cipher);
-            message = cipher;
         }
 
         {
-            std::ifstream pri_in(pri_key_file.c_str());
+            std::ifstream pri_in(pri_key_file.c_str(), std::ios_base::binary);
             if (!pri_in.is_open()) {
                 ui->test_license_log->append("[key-gen-widget] Arquivo de chave privada " + qpri_file + " não é válido.");
                 return;
@@ -244,7 +260,7 @@ void KeyGen::on_test_license_clicked()
             key_gen.load_private_key(pri_in, pri_key);
         }
 
-        //key_gen.decrypt(pri_key, cipher, message);
+        key_gen.decrypt(pri_key, cipher, message);
 
         ui->test_license_log->append("[key-gen-widget] Licença desencriptada: " + QString(message.c_str()));
     } catch( CryptoPP::Exception& e ) {

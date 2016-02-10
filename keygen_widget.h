@@ -32,22 +32,18 @@ class StdWorker : public QObject {
 public:
     using StdJob = std::function<void()>;
 
-    StdWorker(StdJob job) : job(job) {
-        thread = new QThread;
+    StdWorker(StdJob _job) : QObject(0), job(_job), thread() {
+        connect(&thread, SIGNAL(started()), this, SLOT(process()), Qt::QueuedConnection);
+        connect(this, SIGNAL(finished()), this, SLOT(deleteLater()), Qt::QueuedConnection);
 
-
-        connect(thread, SIGNAL(started()), this, SLOT(process()));
-        connect(this, SIGNAL(finished()), thread, SLOT(quit()));
-        connect(this, SIGNAL(finished()), this, SLOT(deleteLater()));
-        connect(this, SIGNAL(finished()), thread, SLOT(deleteLater()));
-
-        this->moveToThread(thread);
+        this->moveToThread(&thread);
     }
 
     virtual ~StdWorker() {}
 
     void start() {
-        thread->start();
+        thread.start();
+        emit finished();
     }
 
 private slots:
@@ -60,8 +56,8 @@ signals:
     void finished();
     void error(QString err);
 private:
-    std::function<void()> job;
-    QThread* thread;
+    StdJob job;
+    QThread thread;
 };
 
 class KeyGen : public QMainWindow
