@@ -39,7 +39,7 @@ win32-g++ {
     DEFINES += NO_OS_DEPENDENCE OS_RNG_AVAILABLE NDEBUG
 }
 
-win32-msvc2013 {
+win32-msvc2015 | win32-msvc2013 {
     INCLUDEPATH += "$${PWD}" \
     "$${PWD}/win_deps/fips140/" \
     "$${PWD}/win_deps/fips140/cryptopp"
