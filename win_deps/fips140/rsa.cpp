@@ -3,14 +3,14 @@
 #include "pch.h"
 #include "rsa.h"
 #include "asn.h"
+#include "sha.h"
 #include "oids.h"
 #include "modarith.h"
 #include "nbtheory.h"
-#include "sha.h"
 #include "algparam.h"
 #include "fips140.h"
 
-#if !defined(NDEBUG) && !defined(CRYPTOPP_IS_DLL)
+#if CRYPTOPP_DEBUG && !defined(CRYPTOPP_DOXYGEN_PROCESSING) && !defined(CRYPTOPP_IS_DLL)
 #include "pssr.h"
 NAMESPACE_BEGIN(CryptoPP)
 void RSA_TestInstantiations()
@@ -45,7 +45,7 @@ OID RSAFunction::GetAlgorithmID() const
 	return ASN1::rsaEncryption();
 }
 
-void RSAFunction::BERDecodeKey(BufferedTransformation &bt)
+void RSAFunction::BERDecodePublicKey(BufferedTransformation &bt, bool, size_t)
 {
 	BERSequenceDecoder seq(bt);
 		m_n.BERDecode(seq);
@@ -53,7 +53,7 @@ void RSAFunction::BERDecodeKey(BufferedTransformation &bt)
 	seq.MessageEnd();
 }
 
-void RSAFunction::DEREncodeKey(BufferedTransformation &bt) const
+void RSAFunction::DEREncodePublicKey(BufferedTransformation &bt) const
 {
 	DERSequenceEncoder seq(bt);
 		m_n.DEREncode(seq);
@@ -67,8 +67,10 @@ Integer RSAFunction::ApplyFunction(const Integer &x) const
 	return a_exp_b_mod_c(x, m_e, m_n);
 }
 
-bool RSAFunction::Validate(RandomNumberGenerator &rng, unsigned int level) const
+bool RSAFunction::Validate(RandomNumberGenerator& rng, unsigned int level) const
 {
+	CRYPTOPP_UNUSED(rng), CRYPTOPP_UNUSED(level);
+
 	bool pass = true;
 	pass = pass && m_n > Integer::One() && m_n.IsOdd();
 	pass = pass && m_e > Integer::One() && m_e.IsOdd() && m_e < m_n;
@@ -106,22 +108,24 @@ void InvertibleRSAFunction::GenerateRandom(RandomNumberGenerator &rng, const Nam
 	int modulusSize = 2048;
 	alg.GetIntValue(Name::ModulusSize(), modulusSize) || alg.GetIntValue(Name::KeySize(), modulusSize);
 
+	CRYPTOPP_ASSERT(modulusSize >= 16);
 	if (modulusSize < 16)
 		throw InvalidArgument("InvertibleRSAFunction: specified modulus size is too small");
 
 	m_e = alg.GetValueWithDefault(Name::PublicExponent(), Integer(17));
 
+	CRYPTOPP_ASSERT(m_e >= 3); CRYPTOPP_ASSERT(!m_e.IsEven());
 	if (m_e < 3 || m_e.IsEven())
 		throw InvalidArgument("InvertibleRSAFunction: invalid public exponent");
 
 	RSAPrimeSelector selector(m_e);
-	const NameValuePairs &primeParam = MakeParametersForTwoPrimesOfEqualSize(modulusSize)
+	AlgorithmParameters primeParam = MakeParametersForTwoPrimesOfEqualSize(modulusSize)
 		(Name::PointerToPrimeSelector(), selector.GetSelectorPointer());
 	m_p.GenerateRandom(rng, primeParam);
 	m_q.GenerateRandom(rng, primeParam);
 
-	m_d = EuclideanMultiplicativeInverse(m_e, LCM(m_p-1, m_q-1));
-	assert(m_d.IsPositive());
+	m_d = m_e.InverseMod(LCM(m_p-1, m_q-1));
+	CRYPTOPP_ASSERT(m_d.IsPositive());
 
 	m_dp = m_d % (m_p-1);
 	m_dq = m_d % (m_q-1);
@@ -189,7 +193,7 @@ void InvertibleRSAFunction::Initialize(const Integer &n, const Integer &e, const
 	}
 }
 
-void InvertibleRSAFunction::BERDecodeKey(BufferedTransformation &bt)
+void InvertibleRSAFunction::BERDecodePrivateKey(BufferedTransformation &bt, bool, size_t)
 {
 	BERSequenceDecoder privateKey(bt);
 		word32 version;
@@ -205,7 +209,7 @@ void InvertibleRSAFunction::BERDecodeKey(BufferedTransformation &bt)
 	privateKey.MessageEnd();
 }
 
-void InvertibleRSAFunction::DEREncodeKey(BufferedTransformation &bt) const
+void InvertibleRSAFunction::DEREncodePrivateKey(BufferedTransformation &bt) const
 {
 	DERSequenceEncoder privateKey(bt);
 		DEREncodeUnsigned<word32>(privateKey, 0);	// version
@@ -220,12 +224,12 @@ void InvertibleRSAFunction::DEREncodeKey(BufferedTransformation &bt) const
 	privateKey.MessageEnd();
 }
 
-Integer InvertibleRSAFunction::CalculateInverse(RandomNumberGenerator &rng, const Integer &x) const 
+Integer InvertibleRSAFunction::CalculateInverse(RandomNumberGenerator &rng, const Integer &x) const
 {
 	DoQuickSanityCheck();
 	ModularArithmetic modn(m_n);
 	Integer r, rInv;
-	do {	// do this loop for people using small numbers for testing
+	do {	// do this in a loop for people using small numbers for testing
 		r.Randomize(rng, Integer::One(), m_n - Integer::One());
 		rInv = modn.MultiplicativeInverse(r);
 	} while (rInv.IsZero());
@@ -293,7 +297,7 @@ Integer RSAFunction_ISO::ApplyFunction(const Integer &x) const
 	return t % 16 == 12 ? t : m_n - t;
 }
 
-Integer InvertibleRSAFunction_ISO::CalculateInverse(RandomNumberGenerator &rng, const Integer &x) const 
+Integer InvertibleRSAFunction_ISO::CalculateInverse(RandomNumberGenerator &rng, const Integer &x) const
 {
 	Integer t = InvertibleRSAFunction::CalculateInverse(rng, x);
 	return STDMIN(t, m_n-t);

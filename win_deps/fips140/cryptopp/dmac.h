@@ -1,3 +1,9 @@
+// dmac.h - written and placed in the public domain by Wei Dai
+
+//! \file
+//! \headerfile dmac.h
+//! \brief Classes for DMAC message authentication code
+
 #ifndef CRYPTOPP_DMAC_H
 #define CRYPTOPP_DMAC_H
 
@@ -12,11 +18,11 @@ class CRYPTOPP_NO_VTABLE DMAC_Base : public SameKeyLengthAs<T>, public MessageAu
 public:
 	static std::string StaticAlgorithmName() {return std::string("DMAC(") + T::StaticAlgorithmName() + ")";}
 
-	enum {DIGESTSIZE=T::BLOCKSIZE};
+	CRYPTOPP_CONSTANT(DIGESTSIZE=T::BLOCKSIZE)
 
-	DMAC_Base() {}
+	DMAC_Base() : m_subkeylength(0), m_counter(0) {}
 
-	void CheckedSetKey(void *, Empty empty, const byte *key, size_t length, const NameValuePairs &params);
+	void UncheckedSetKey(const byte *key, unsigned int length, const NameValuePairs &params);
 	void Update(const byte *input, size_t length);
 	void TruncatedFinal(byte *mac, size_t size);
 	unsigned int DigestSize() const {return DIGESTSIZE;}
@@ -45,7 +51,7 @@ public:
 };
 
 template <class T>
-void DMAC_Base<T>::CheckedSetKey(void *, Empty empty, const byte *key, size_t length, const NameValuePairs &params)
+void DMAC_Base<T>::UncheckedSetKey(const byte *key, unsigned int length, const NameValuePairs &params)
 {
 	m_subkeylength = T::StaticGetValidKeyLength(T::BLOCKSIZE);
 	m_subkeys.resize(2*UnsignedMin((unsigned int)T::BLOCKSIZE, m_subkeylength));
@@ -73,6 +79,8 @@ void DMAC_Base<T>::TruncatedFinal(byte *mac, size_t size)
 	m_mac1.Update(pad, padByte);
 	m_mac1.TruncatedFinal(mac, size);
 	m_f2.ProcessBlock(mac);
+
+	m_counter = 0;	// reset for next message
 }
 
 template <class T>

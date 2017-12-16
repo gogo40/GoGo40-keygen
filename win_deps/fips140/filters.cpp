@@ -1,6 +1,15 @@
 // filters.cpp - written and placed in the public domain by Wei Dai
 
 #include "pch.h"
+#include "config.h"
+
+#if CRYPTOPP_MSC_VERSION
+# pragma warning(disable: 4100 4189)
+#endif
+
+#if CRYPTOPP_GCC_DIAGNOSTIC_AVAILABLE
+# pragma GCC diagnostic ignored "-Wunused-value"
+#endif
 
 #ifndef CRYPTOPP_IMPORTS
 
@@ -8,13 +17,14 @@
 #include "mqueue.h"
 #include "fltrimpl.h"
 #include "argnames.h"
-#include <memory>
-#include <functional>
+#include "smartptr.h"
+#include "stdcpp.h"
+#include "misc.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
 Filter::Filter(BufferedTransformation *attachment)
-	: m_attachment(attachment), m_continueAt(0)
+	: m_attachment(attachment), m_inputPosition(0), m_continueAt(0)
 {
 }
 
@@ -60,7 +70,7 @@ size_t Filter::TransferTo2(BufferedTransformation &target, lword &transferBytes,
 
 void Filter::Initialize(const NameValuePairs &parameters, int propagation)
 {
-	m_continueAt = 0;
+	m_inputPosition = m_continueAt = 0;
 	IsolatedInitialize(parameters);
 	PropagateInitialize(parameters, propagation);
 }
@@ -72,9 +82,12 @@ bool Filter::Flush(bool hardFlush, int propagation, bool blocking)
 	case 0:
 		if (IsolatedFlush(hardFlush, blocking))
 			return true;
+		// fall through
 	case 1:
 		if (OutputFlush(1, hardFlush, propagation, blocking))
 			return true;
+		// fall through
+	default: ;;
 	}
 	return false;
 }
@@ -86,9 +99,12 @@ bool Filter::MessageSeriesEnd(int propagation, bool blocking)
 	case 0:
 		if (IsolatedMessageSeriesEnd(blocking))
 			return true;
+		// fall through
 	case 1:
 		if (ShouldPropagateMessageSeriesEnd() && OutputMessageSeriesEnd(1, propagation, blocking))
 			return true;
+		// fall through
+	default: ;;
 	}
 	return false;
 }
@@ -103,7 +119,7 @@ size_t Filter::OutputModifiable(int outputSite, byte *inString, size_t length, i
 {
 	if (messageEnd)
 		messageEnd--;
-	size_t result = AttachedTransformation()->PutModifiable2(inString, length, messageEnd, blocking);
+	size_t result = AttachedTransformation()->ChannelPutModifiable2(channel, inString, length, messageEnd, blocking);
 	m_continueAt = result ? outputSite : 0;
 	return result;
 }
@@ -112,7 +128,7 @@ size_t Filter::Output(int outputSite, const byte *inString, size_t length, int m
 {
 	if (messageEnd)
 		messageEnd--;
-	size_t result = AttachedTransformation()->Put2(inString, length, messageEnd, blocking);
+	size_t result = AttachedTransformation()->ChannelPut2(channel, inString, length, messageEnd, blocking);
 	m_continueAt = result ? outputSite : 0;
 	return result;
 }
@@ -172,7 +188,7 @@ size_t MeterFilter::PutMaybeModifiable(byte *begin, size_t length, int messageEn
 		{
 			FILTER_OUTPUT_MAYBE_MODIFIABLE(1, m_begin, t = (size_t)SaturatingSubtract(m_rangesToSkip.front().position, m_currentMessageBytes), false, modifiable);
 
-			assert(t < m_length);
+			CRYPTOPP_ASSERT(t < m_length);
 			m_begin += t;
 			m_length -= t;
 			m_currentMessageBytes += t;
@@ -183,7 +199,7 @@ size_t MeterFilter::PutMaybeModifiable(byte *begin, size_t length, int messageEn
 			else
 			{
 				t = (size_t)SaturatingSubtract(m_rangesToSkip.front().position + m_rangesToSkip.front().size, m_currentMessageBytes);
-				assert(t <= m_length);
+				CRYPTOPP_ASSERT(t <= m_length);
 				m_rangesToSkip.pop_front();
 			}
 
@@ -225,6 +241,7 @@ size_t MeterFilter::PutModifiable2(byte *begin, size_t length, int messageEnd, b
 
 bool MeterFilter::IsolatedMessageSeriesEnd(bool blocking)
 {
+	CRYPTOPP_UNUSED(blocking);
 	m_currentMessageBytes = 0;
 	m_currentSeriesMessages = 0;
 	m_totalMessageSeries++;
@@ -269,6 +286,9 @@ byte *FilterWithBufferedInput::BlockQueue::GetContigousBlocks(size_t &numberOfBy
 
 size_t FilterWithBufferedInput::BlockQueue::GetAll(byte *outString)
 {
+	// Avoid passing NULL pointer to memcpy
+	if (!outString) return 0;
+
 	size_t size = m_size;
 	size_t numberOfBytes = m_maxBlocks*m_blockSize;
 	const byte *ptr = GetContigousBlocks(numberOfBytes);
@@ -280,7 +300,10 @@ size_t FilterWithBufferedInput::BlockQueue::GetAll(byte *outString)
 
 void FilterWithBufferedInput::BlockQueue::Put(const byte *inString, size_t length)
 {
-	assert(m_size + length <= m_buffer.size());
+	// Avoid passing NULL pointer to memcpy
+	if (!inString || !length) return;
+
+	CRYPTOPP_ASSERT(m_size + length <= m_buffer.size());
 	byte *end = (m_size < size_t(m_buffer.end()-m_begin)) ? m_begin + m_size : m_begin + m_size - m_buffer.size();
 	size_t len = STDMIN(length, size_t(m_buffer.end()-end));
 	memcpy(end, inString, len);
@@ -289,16 +312,22 @@ void FilterWithBufferedInput::BlockQueue::Put(const byte *inString, size_t lengt
 	m_size += length;
 }
 
+#if !defined(CRYPTOPP_MAINTAIN_BACKWARDS_COMPATIBILITY_562)
+FilterWithBufferedInput::FilterWithBufferedInput()
+	: Filter(), m_firstSize(SIZE_MAX), m_blockSize(0), m_lastSize(SIZE_MAX), m_firstInputDone(false)
+{
+}
+#endif
+
 FilterWithBufferedInput::FilterWithBufferedInput(BufferedTransformation *attachment)
-	: Filter(attachment)
+	: Filter(attachment), m_firstSize(SIZE_MAX), m_blockSize(0), m_lastSize(SIZE_MAX), m_firstInputDone(false)
 {
 }
 
 FilterWithBufferedInput::FilterWithBufferedInput(size_t firstSize, size_t blockSize, size_t lastSize, BufferedTransformation *attachment)
-	: Filter(attachment), m_firstSize(firstSize), m_blockSize(blockSize), m_lastSize(lastSize)
-	, m_firstInputDone(false)
+	: Filter(attachment), m_firstSize(firstSize), m_blockSize(blockSize), m_lastSize(lastSize), m_firstInputDone(false)
 {
-	if (m_firstSize < 0 || m_blockSize < 1 || m_lastSize < 0)
+	if (m_firstSize == SIZE_MAX || m_blockSize < 1 || m_lastSize == SIZE_MAX)
 		throw InvalidArgument("FilterWithBufferedInput: invalid buffer size");
 
 	m_queue.ResetQueue(1, m_firstSize);
@@ -307,7 +336,7 @@ FilterWithBufferedInput::FilterWithBufferedInput(size_t firstSize, size_t blockS
 void FilterWithBufferedInput::IsolatedInitialize(const NameValuePairs &parameters)
 {
 	InitializeDerivedAndReturnNewSizes(parameters, m_firstSize, m_blockSize, m_lastSize);
-	if (m_firstSize < 0 || m_blockSize < 1 || m_lastSize < 0)
+	if (m_firstSize == SIZE_MAX || m_blockSize < 1 || m_lastSize == SIZE_MAX)
 		throw InvalidArgument("FilterWithBufferedInput: invalid buffer size");
 	m_queue.ResetQueue(1, m_firstSize);
 	m_firstInputDone = false;
@@ -317,11 +346,11 @@ bool FilterWithBufferedInput::IsolatedFlush(bool hardFlush, bool blocking)
 {
 	if (!blocking)
 		throw BlockingInputOnly("FilterWithBufferedInput");
-	
+
 	if (hardFlush)
 		ForceNextPut();
 	FlushDerived();
-	
+
 	return false;
 }
 
@@ -339,7 +368,7 @@ size_t FilterWithBufferedInput::PutMaybeModifiable(byte *inString, size_t length
 			size_t len = m_firstSize - m_queue.CurrentSize();
 			m_queue.Put(inString, len);
 			FirstPut(m_queue.GetContigousBlocks(m_firstSize));
-			assert(m_queue.CurrentSize() == 0);
+			CRYPTOPP_ASSERT(m_queue.CurrentSize() == 0);
 			m_queue.ResetQueue(m_blockSize, (2*m_blockSize+m_lastSize-2)/m_blockSize);
 
 			inString += len;
@@ -377,7 +406,7 @@ size_t FilterWithBufferedInput::PutMaybeModifiable(byte *inString, size_t length
 
 				if (newLength >= m_blockSize + m_lastSize && m_queue.CurrentSize() > 0)
 				{
-					assert(m_queue.CurrentSize() < m_blockSize);
+					CRYPTOPP_ASSERT(m_queue.CurrentSize() < m_blockSize);
 					size_t len = m_blockSize - m_queue.CurrentSize();
 					m_queue.Put(inString, len);
 					inString += len;
@@ -410,7 +439,8 @@ size_t FilterWithBufferedInput::PutMaybeModifiable(byte *inString, size_t length
 		m_firstInputDone = false;
 		m_queue.ResetQueue(1, m_firstSize);
 
-		Output(1, NULL, 0, messageEnd, blocking);
+		// Cast to void to supress Coverity finding
+		(void)Output(1, NULL, 0, messageEnd, blocking);
 	}
 	return 0;
 }
@@ -419,7 +449,7 @@ void FilterWithBufferedInput::ForceNextPut()
 {
 	if (!m_firstInputDone)
 		return;
-	
+
 	if (m_blockSize > 1)
 	{
 		while (m_queue.CurrentSize() >= m_blockSize)
@@ -435,10 +465,10 @@ void FilterWithBufferedInput::ForceNextPut()
 
 void FilterWithBufferedInput::NextPutMultiple(const byte *inString, size_t length)
 {
-	assert(m_blockSize > 1);	// m_blockSize = 1 should always override this function
+	CRYPTOPP_ASSERT(m_blockSize > 1);	// m_blockSize = 1 should always override this function
 	while (length > 0)
 	{
-		assert(length >= m_blockSize);
+		CRYPTOPP_ASSERT(length >= m_blockSize);
 		NextPutSingle(inString);
 		inString += m_blockSize;
 		length -= m_blockSize;
@@ -476,7 +506,7 @@ void ProxyFilter::SetFilter(Filter *filter)
 	if (filter)
 	{
 		OutputProxy *proxy;
-		std::auto_ptr<OutputProxy> temp(proxy = new OutputProxy(*this, false));
+		member_ptr<OutputProxy> temp(proxy = new OutputProxy(*this, false));
 		m_filter->TransferAllTo(*proxy);
 		m_filter->Attach(temp.release());
 	}
@@ -496,11 +526,32 @@ void ProxyFilter::NextPutModifiable(byte *s, size_t len)
 
 // *************************************************************
 
+void RandomNumberSink::IsolatedInitialize(const NameValuePairs &parameters)
+{
+	parameters.GetRequiredParameter("RandomNumberSink", "RandomNumberGeneratorPointer", m_rng);
+}
+
+size_t RandomNumberSink::Put2(const byte *begin, size_t length, int messageEnd, bool blocking)
+{
+	CRYPTOPP_UNUSED(messageEnd); CRYPTOPP_UNUSED(blocking);
+	m_rng->IncorporateEntropy(begin, length);
+	return 0;
+}
+
 size_t ArraySink::Put2(const byte *begin, size_t length, int messageEnd, bool blocking)
 {
-	memcpy(m_buf+m_total, begin, STDMIN(length, SaturatingSubtract(m_size, m_total)));
-	m_total += length;
-	return 0;
+	CRYPTOPP_UNUSED(messageEnd); CRYPTOPP_UNUSED(blocking);
+
+	// Avoid passing NULL pointer to memcpy. Using memmove due to
+	//  Valgrind finding on overlapping buffers.
+	size_t copied = 0;
+	if (m_buf && begin)
+	{
+		copied = STDMIN(length, SaturatingSubtract(m_size, m_total));
+		memmove(m_buf+m_total, begin, copied);
+	}
+	m_total += copied;
+	return length - copied;
 }
 
 byte * ArraySink::CreatePutSpace(size_t &size)
@@ -516,17 +567,36 @@ void ArraySink::IsolatedInitialize(const NameValuePairs &parameters)
 		throw InvalidArgument("ArraySink: missing OutputBuffer argument");
 	m_buf = array.begin();
 	m_size = array.size();
-	m_total = 0;
 }
 
 size_t ArrayXorSink::Put2(const byte *begin, size_t length, int messageEnd, bool blocking)
 {
-	xorbuf(m_buf+m_total, begin, STDMIN(length, SaturatingSubtract(m_size, m_total)));
-	m_total += length;
-	return 0;
+	CRYPTOPP_UNUSED(messageEnd); CRYPTOPP_UNUSED(blocking);
+
+	// Avoid passing NULL pointer to xorbuf
+	size_t copied = 0;
+	if (m_buf && begin)
+	{
+		copied = STDMIN(length, SaturatingSubtract(m_size, m_total));
+		xorbuf(m_buf+m_total, begin, copied);
+	}
+	m_total += copied;
+	return length - copied;
 }
 
 // *************************************************************
+
+StreamTransformationFilter::StreamTransformationFilter(StreamTransformation &c, BufferedTransformation *attachment, BlockPaddingScheme padding, bool allowAuthenticatedSymmetricCipher)
+	: FilterWithBufferedInput(attachment)
+	, m_cipher(c), m_padding(DEFAULT_PADDING), m_optimalBufferSize(0)
+{
+	CRYPTOPP_ASSERT(c.MinLastBlockSize() == 0 || c.MinLastBlockSize() > c.MandatoryBlockSize());
+
+	if (!allowAuthenticatedSymmetricCipher && dynamic_cast<AuthenticatedSymmetricCipher *>(&c) != 0)
+		throw InvalidArgument("StreamTransformationFilter: please use AuthenticatedEncryptionFilter and AuthenticatedDecryptionFilter for AuthenticatedSymmetricCipher");
+
+	IsolatedInitialize(MakeParameters(Name::BlockPaddingScheme(), padding));
+}
 
 size_t StreamTransformationFilter::LastBlockSize(StreamTransformation &c, BlockPaddingScheme padding)
 {
@@ -538,30 +608,27 @@ size_t StreamTransformationFilter::LastBlockSize(StreamTransformation &c, BlockP
 		return 0;
 }
 
-StreamTransformationFilter::StreamTransformationFilter(StreamTransformation &c, BufferedTransformation *attachment, BlockPaddingScheme padding)
-   : FilterWithBufferedInput(0, c.MandatoryBlockSize(), LastBlockSize(c, padding), attachment)
-	, m_cipher(c)
+void StreamTransformationFilter::InitializeDerivedAndReturnNewSizes(const NameValuePairs &parameters, size_t &firstSize, size_t &blockSize, size_t &lastSize)
 {
-	assert(c.MinLastBlockSize() == 0 || c.MinLastBlockSize() > c.MandatoryBlockSize());
-
-	bool isBlockCipher = (c.MandatoryBlockSize() > 1 && c.MinLastBlockSize() == 0);
+	BlockPaddingScheme padding = parameters.GetValueWithDefault(Name::BlockPaddingScheme(), DEFAULT_PADDING);
+	bool isBlockCipher = (m_cipher.MandatoryBlockSize() > 1 && m_cipher.MinLastBlockSize() == 0);
 
 	if (padding == DEFAULT_PADDING)
-	{
-		if (isBlockCipher)
-			m_padding = PKCS_PADDING;
-		else
-			m_padding = NO_PADDING;
-	}
+		m_padding = isBlockCipher ? PKCS_PADDING : NO_PADDING;
 	else
 		m_padding = padding;
 
 	if (!isBlockCipher && (m_padding == PKCS_PADDING || m_padding == ONE_AND_ZEROS_PADDING))
-		throw InvalidArgument("StreamTransformationFilter: PKCS_PADDING and ONE_AND_ZEROS_PADDING cannot be used with " + c.AlgorithmName());
+		throw InvalidArgument("StreamTransformationFilter: PKCS_PADDING and ONE_AND_ZEROS_PADDING cannot be used with " + m_cipher.AlgorithmName());
+
+	firstSize = 0;
+	blockSize = m_cipher.MandatoryBlockSize();
+	lastSize = LastBlockSize(m_cipher, m_padding);
 }
 
-void StreamTransformationFilter::FirstPut(const byte *inString)
+void StreamTransformationFilter::FirstPut(const byte* inString)
 {
+	CRYPTOPP_UNUSED(inString);
 	m_optimalBufferSize = m_cipher.OptimalBlockSize();
 	m_optimalBufferSize = (unsigned int)STDMAX(m_optimalBufferSize, RoundDownToMultipleOf(4096U, m_optimalBufferSize));
 }
@@ -576,7 +643,7 @@ void StreamTransformationFilter::NextPutMultiple(const byte *inString, size_t le
 	do
 	{
 		size_t len = m_optimalBufferSize;
-		byte *space = HelpCreatePutSpace(*AttachedTransformation(), NULL_CHANNEL, s, length, len);
+		byte *space = HelpCreatePutSpace(*AttachedTransformation(), DEFAULT_CHANNEL, s, length, len);
 		if (len < length)
 		{
 			if (len == m_optimalBufferSize)
@@ -602,7 +669,7 @@ void StreamTransformationFilter::NextPutModifiable(byte *inString, size_t length
 void StreamTransformationFilter::LastPut(const byte *inString, size_t length)
 {
 	byte *space = NULL;
-	
+
 	switch (m_padding)
 	{
 	case NO_PADDING:
@@ -616,8 +683,8 @@ void StreamTransformationFilter::LastPut(const byte *inString, size_t length)
 			{
 				// do padding
 				size_t blockSize = STDMAX(minLastBlockSize, (size_t)m_cipher.MandatoryBlockSize());
-				space = HelpCreatePutSpace(*AttachedTransformation(), NULL_CHANNEL, blockSize);
-				memcpy(space, inString, length);
+				space = HelpCreatePutSpace(*AttachedTransformation(), DEFAULT_CHANNEL, blockSize);
+				if (inString) {memcpy(space, inString, length);}
 				memset(space + length, 0, blockSize - length);
 				m_cipher.ProcessLastBlock(space, space, blockSize);
 				AttachedTransformation()->Put(space, blockSize);
@@ -632,7 +699,7 @@ void StreamTransformationFilter::LastPut(const byte *inString, size_t length)
 						throw InvalidCiphertext("StreamTransformationFilter: ciphertext length is not a multiple of block size");
 				}
 
-				space = HelpCreatePutSpace(*AttachedTransformation(), NULL_CHANNEL, length, m_optimalBufferSize);
+				space = HelpCreatePutSpace(*AttachedTransformation(), DEFAULT_CHANNEL, length, m_optimalBufferSize);
 				m_cipher.ProcessLastBlock(space, inString, length);
 				AttachedTransformation()->Put(space, length);
 			}
@@ -643,15 +710,15 @@ void StreamTransformationFilter::LastPut(const byte *inString, size_t length)
 	case ONE_AND_ZEROS_PADDING:
 		unsigned int s;
 		s = m_cipher.MandatoryBlockSize();
-		assert(s > 1);
-		space = HelpCreatePutSpace(*AttachedTransformation(), NULL_CHANNEL, s, m_optimalBufferSize);
+		CRYPTOPP_ASSERT(s > 1);
+		space = HelpCreatePutSpace(*AttachedTransformation(), DEFAULT_CHANNEL, s, m_optimalBufferSize);
 		if (m_cipher.IsForwardTransformation())
 		{
-			assert(length < s);
-			memcpy(space, inString, length);
+			CRYPTOPP_ASSERT(length < s);
+			if (inString) {memcpy(space, inString, length);}
 			if (m_padding == PKCS_PADDING)
 			{
-				assert(s < 256);
+				CRYPTOPP_ASSERT(s < 256);
 				byte pad = byte(s-length);
 				memset(space+length, pad, s-length);
 			}
@@ -687,66 +754,72 @@ void StreamTransformationFilter::LastPut(const byte *inString, size_t length)
 		break;
 
 	default:
-		assert(false);
+		CRYPTOPP_ASSERT(false);
 	}
 }
 
 // *************************************************************
 
+HashFilter::HashFilter(HashTransformation &hm, BufferedTransformation *attachment, bool putMessage, int truncatedDigestSize, const std::string &messagePutChannel, const std::string &hashPutChannel)
+	: m_hashModule(hm), m_putMessage(putMessage), m_digestSize(0), m_space(NULL)
+	, m_messagePutChannel(messagePutChannel), m_hashPutChannel(hashPutChannel)
+{
+	m_digestSize = truncatedDigestSize < 0 ? m_hashModule.DigestSize() : truncatedDigestSize;
+	Detach(attachment);
+}
+
 void HashFilter::IsolatedInitialize(const NameValuePairs &parameters)
 {
 	m_putMessage = parameters.GetValueWithDefault(Name::PutMessage(), false);
-	m_truncatedDigestSize = parameters.GetIntValueWithDefault(Name::TruncatedDigestSize(), -1);
-	m_hashModule.Restart();
+	int s = parameters.GetIntValueWithDefault(Name::TruncatedDigestSize(), -1);
+	m_digestSize = s < 0 ? m_hashModule.DigestSize() : s;
 }
 
 size_t HashFilter::Put2(const byte *inString, size_t length, int messageEnd, bool blocking)
 {
 	FILTER_BEGIN;
-	m_hashModule.Update(inString, length);
 	if (m_putMessage)
-		FILTER_OUTPUT(1, inString, length, 0);
+		FILTER_OUTPUT3(1, 0, inString, length, 0, m_messagePutChannel);
+	if (inString && length)
+		m_hashModule.Update(inString, length);
 	if (messageEnd)
 	{
 		{
 			size_t size;
-			m_digestSize = m_hashModule.DigestSize();
-			if (m_truncatedDigestSize >= 0 && (unsigned int)m_truncatedDigestSize < m_digestSize)
-				m_digestSize = m_truncatedDigestSize;
-			m_space = HelpCreatePutSpace(*AttachedTransformation(), NULL_CHANNEL, m_digestSize, m_digestSize, size = m_digestSize);
+			m_space = HelpCreatePutSpace(*AttachedTransformation(), m_hashPutChannel, m_digestSize, m_digestSize, size = m_digestSize);
 			m_hashModule.TruncatedFinal(m_space, m_digestSize);
 		}
-		FILTER_OUTPUT(2, m_space, m_digestSize, messageEnd);
+		FILTER_OUTPUT3(2, 0, m_space, m_digestSize, messageEnd, m_hashPutChannel);
 	}
 	FILTER_END_NO_MESSAGE_END;
 }
 
 // *************************************************************
 
-HashVerificationFilter::HashVerificationFilter(HashTransformation &hm, BufferedTransformation *attachment, word32 flags)
+HashVerificationFilter::HashVerificationFilter(HashTransformation &hm, BufferedTransformation *attachment, word32 flags, int truncatedDigestSize)
 	: FilterWithBufferedInput(attachment)
-	, m_hashModule(hm)
+	, m_hashModule(hm), m_flags(0), m_digestSize(0), m_verified(false)
 {
-	IsolatedInitialize(MakeParameters(Name::HashVerificationFilterFlags(), flags));
+	IsolatedInitialize(MakeParameters(Name::HashVerificationFilterFlags(), flags)(Name::TruncatedDigestSize(), truncatedDigestSize));
 }
 
 void HashVerificationFilter::InitializeDerivedAndReturnNewSizes(const NameValuePairs &parameters, size_t &firstSize, size_t &blockSize, size_t &lastSize)
 {
 	m_flags = parameters.GetValueWithDefault(Name::HashVerificationFilterFlags(), (word32)DEFAULT_FLAGS);
-	m_hashModule.Restart();
-	size_t size = m_hashModule.DigestSize();
+	int s = parameters.GetIntValueWithDefault(Name::TruncatedDigestSize(), -1);
+	m_digestSize = s < 0 ? m_hashModule.DigestSize() : s;
 	m_verified = false;
-	firstSize = m_flags & HASH_AT_BEGIN ? size : 0;
+	firstSize = m_flags & HASH_AT_BEGIN ? m_digestSize : 0;
 	blockSize = 1;
-	lastSize = m_flags & HASH_AT_BEGIN ? 0 : size;
+	lastSize = m_flags & HASH_AT_BEGIN ? 0 : m_digestSize;
 }
 
 void HashVerificationFilter::FirstPut(const byte *inString)
 {
 	if (m_flags & HASH_AT_BEGIN)
 	{
-		m_expectedHash.New(m_hashModule.DigestSize());
-		memcpy(m_expectedHash, inString, m_expectedHash.size());
+		m_expectedHash.New(m_digestSize);
+		if (inString) {memcpy(m_expectedHash, inString, m_expectedHash.size());}
 		if (m_flags & PUT_HASH)
 			AttachedTransformation()->Put(inString, m_expectedHash.size());
 	}
@@ -763,12 +836,12 @@ void HashVerificationFilter::LastPut(const byte *inString, size_t length)
 {
 	if (m_flags & HASH_AT_BEGIN)
 	{
-		assert(length == 0);
-		m_verified = m_hashModule.Verify(m_expectedHash);
+		CRYPTOPP_ASSERT(length == 0);
+		m_verified = m_hashModule.TruncatedVerify(m_expectedHash, m_digestSize);
 	}
 	else
 	{
-		m_verified = (length==m_hashModule.DigestSize() && m_hashModule.Verify(inString));
+		m_verified = (length==m_digestSize && m_hashModule.TruncatedVerify(inString, length));
 		if (m_flags & PUT_HASH)
 			AttachedTransformation()->Put(inString, length);
 	}
@@ -778,6 +851,115 @@ void HashVerificationFilter::LastPut(const byte *inString, size_t length)
 
 	if ((m_flags & THROW_EXCEPTION) && !m_verified)
 		throw HashVerificationFailed();
+}
+
+// *************************************************************
+
+AuthenticatedEncryptionFilter::AuthenticatedEncryptionFilter(AuthenticatedSymmetricCipher &c, BufferedTransformation *attachment,
+								bool putAAD, int truncatedDigestSize, const std::string &macChannel, BlockPaddingScheme padding)
+	: StreamTransformationFilter(c, attachment, padding, true)
+	, m_hf(c, new OutputProxy(*this, false), putAAD, truncatedDigestSize, AAD_CHANNEL, macChannel)
+{
+	CRYPTOPP_ASSERT(c.IsForwardTransformation());
+}
+
+void AuthenticatedEncryptionFilter::IsolatedInitialize(const NameValuePairs &parameters)
+{
+	m_hf.IsolatedInitialize(parameters);
+	StreamTransformationFilter::IsolatedInitialize(parameters);
+}
+
+byte * AuthenticatedEncryptionFilter::ChannelCreatePutSpace(const std::string &channel, size_t &size)
+{
+	if (channel.empty())
+		return StreamTransformationFilter::CreatePutSpace(size);
+
+	if (channel == AAD_CHANNEL)
+		return m_hf.CreatePutSpace(size);
+
+	throw InvalidChannelName("AuthenticatedEncryptionFilter", channel);
+}
+
+size_t AuthenticatedEncryptionFilter::ChannelPut2(const std::string &channel, const byte *begin, size_t length, int messageEnd, bool blocking)
+{
+	if (channel.empty())
+		return StreamTransformationFilter::Put2(begin, length, messageEnd, blocking);
+
+	if (channel == AAD_CHANNEL)
+		return m_hf.Put2(begin, length, 0, blocking);
+
+	throw InvalidChannelName("AuthenticatedEncryptionFilter", channel);
+}
+
+void AuthenticatedEncryptionFilter::LastPut(const byte *inString, size_t length)
+{
+	StreamTransformationFilter::LastPut(inString, length);
+	m_hf.MessageEnd();
+}
+
+// *************************************************************
+
+AuthenticatedDecryptionFilter::AuthenticatedDecryptionFilter(AuthenticatedSymmetricCipher &c, BufferedTransformation *attachment, word32 flags, int truncatedDigestSize, BlockPaddingScheme padding)
+	: FilterWithBufferedInput(attachment)
+	, m_hashVerifier(c, new OutputProxy(*this, false))
+	, m_streamFilter(c, new OutputProxy(*this, false), padding, true)
+{
+	CRYPTOPP_ASSERT(!c.IsForwardTransformation() || c.IsSelfInverting());
+	IsolatedInitialize(MakeParameters(Name::BlockPaddingScheme(), padding)(Name::AuthenticatedDecryptionFilterFlags(), flags)(Name::TruncatedDigestSize(), truncatedDigestSize));
+}
+
+void AuthenticatedDecryptionFilter::InitializeDerivedAndReturnNewSizes(const NameValuePairs &parameters, size_t &firstSize, size_t &blockSize, size_t &lastSize)
+{
+	word32 flags = parameters.GetValueWithDefault(Name::AuthenticatedDecryptionFilterFlags(), (word32)DEFAULT_FLAGS);
+
+	m_hashVerifier.Initialize(CombinedNameValuePairs(parameters, MakeParameters(Name::HashVerificationFilterFlags(), flags)));
+	m_streamFilter.Initialize(parameters);
+
+	firstSize = m_hashVerifier.m_firstSize;
+	blockSize = 1;
+	lastSize = m_hashVerifier.m_lastSize;
+}
+
+byte * AuthenticatedDecryptionFilter::ChannelCreatePutSpace(const std::string &channel, size_t &size)
+{
+	if (channel.empty())
+		return m_streamFilter.CreatePutSpace(size);
+
+	if (channel == AAD_CHANNEL)
+		return m_hashVerifier.CreatePutSpace(size);
+
+	throw InvalidChannelName("AuthenticatedDecryptionFilter", channel);
+}
+
+size_t AuthenticatedDecryptionFilter::ChannelPut2(const std::string &channel, const byte *begin, size_t length, int messageEnd, bool blocking)
+{
+	if (channel.empty())
+	{
+		if (m_lastSize > 0)
+			m_hashVerifier.ForceNextPut();
+		return FilterWithBufferedInput::Put2(begin, length, messageEnd, blocking);
+	}
+
+	if (channel == AAD_CHANNEL)
+		return m_hashVerifier.Put2(begin, length, 0, blocking);
+
+	throw InvalidChannelName("AuthenticatedDecryptionFilter", channel);
+}
+
+void AuthenticatedDecryptionFilter::FirstPut(const byte *inString)
+{
+	m_hashVerifier.Put(inString, m_firstSize);
+}
+
+void AuthenticatedDecryptionFilter::NextPutMultiple(const byte *inString, size_t length)
+{
+	m_streamFilter.Put(inString, length);
+}
+
+void AuthenticatedDecryptionFilter::LastPut(const byte *inString, size_t length)
+{
+	m_streamFilter.MessageEnd();
+	m_hashVerifier.PutMessageEnd(inString, length);
 }
 
 // *************************************************************
@@ -806,7 +988,7 @@ size_t SignerFilter::Put2(const byte *inString, size_t length, int messageEnd, b
 
 SignatureVerificationFilter::SignatureVerificationFilter(const PK_Verifier &verifier, BufferedTransformation *attachment, word32 flags)
 	: FilterWithBufferedInput(attachment)
-	, m_verifier(verifier)
+	, m_verifier(verifier), m_flags(0), m_verified(0)
 {
 	IsolatedInitialize(MakeParameters(Name::SignatureVerificationFilterFlags(), flags));
 }
@@ -816,7 +998,7 @@ void SignatureVerificationFilter::InitializeDerivedAndReturnNewSizes(const NameV
 	m_flags = parameters.GetValueWithDefault(Name::SignatureVerificationFilterFlags(), (word32)DEFAULT_FLAGS);
 	m_messageAccumulator.reset(m_verifier.NewVerificationAccumulator());
 	size_t size = m_verifier.SignatureLength();
-	assert(size != 0);	// TODO: handle recoverable signature scheme
+	CRYPTOPP_ASSERT(size != 0);	// TODO: handle recoverable signature scheme
 	m_verified = false;
 	firstSize = m_flags & SIGNATURE_AT_BEGIN ? size : 0;
 	blockSize = 1;
@@ -832,7 +1014,7 @@ void SignatureVerificationFilter::FirstPut(const byte *inString)
 		else
 		{
 			m_signature.New(m_verifier.SignatureLength());
-			memcpy(m_signature, inString, m_signature.size());
+			if (inString) {memcpy(m_signature, inString, m_signature.size());}
 		}
 
 		if (m_flags & PUT_SIGNATURE)
@@ -840,7 +1022,7 @@ void SignatureVerificationFilter::FirstPut(const byte *inString)
 	}
 	else
 	{
-		assert(!m_verifier.SignatureUpfront());
+		CRYPTOPP_ASSERT(!m_verifier.SignatureUpfront());
 	}
 }
 
@@ -855,7 +1037,7 @@ void SignatureVerificationFilter::LastPut(const byte *inString, size_t length)
 {
 	if (m_flags & SIGNATURE_AT_BEGIN)
 	{
-		assert(length == 0);
+		CRYPTOPP_ASSERT(length == 0);
 		m_verifier.InputSignature(*m_messageAccumulator, m_signature, m_signature.size());
 		m_verified = m_verifier.VerifyAndRestart(*m_messageAccumulator);
 	}
@@ -952,9 +1134,10 @@ size_t RandomNumberStore::TransferTo2(BufferedTransformation &target, lword &tra
 	if (!blocking)
 		throw NotImplemented("RandomNumberStore: nonblocking transfer is not implemented by this object");
 
-	lword transferMax = transferBytes;
-	for (transferBytes = 0; transferBytes<transferMax && m_count < (unsigned int)m_length; ++transferBytes, ++m_count)
-		target.ChannelPut(channel, m_rng->GenerateByte());
+	transferBytes = UnsignedMin(transferBytes, m_length - m_count);
+	m_rng->GenerateIntoBufferedTransformation(target, channel, transferBytes);
+	m_count += transferBytes;
+
 	return 0;
 }
 

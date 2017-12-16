@@ -3,15 +3,15 @@
 #include "pch.h"
 #include "rc5.h"
 #include "misc.h"
+#include "secblock.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
-void RC5::Base::UncheckedSetKey(CipherDir direction, const byte *k, unsigned int keylen, unsigned int rounds)
+void RC5::Base::UncheckedSetKey(const byte *k, unsigned int keylen, const NameValuePairs &params)
 {
 	AssertValidKeyLength(keylen);
-	AssertValidRounds(rounds);
 
-	r = rounds;
+	r = GetRoundsAndThrowIfInvalid(params, this);
 	sTable.New(2*(r+1));
 
 	static const RC5_WORD MAGIC_P = 0xb7e15163L;    // magic constant P for wordsize

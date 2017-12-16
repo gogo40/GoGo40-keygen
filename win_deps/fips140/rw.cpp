@@ -1,11 +1,21 @@
 // rw.cpp - written and placed in the public domain by Wei Dai
 
 #include "pch.h"
+
 #include "rw.h"
+#include "asn.h"
+#include "integer.h"
 #include "nbtheory.h"
+#include "modarith.h"
 #include "asn.h"
 
 #ifndef CRYPTOPP_IMPORTS
+
+#if defined(_OPENMP)
+static const bool CRYPTOPP_RW_USE_OMP = true;
+#else
+static const bool CRYPTOPP_RW_USE_OMP = false;
+#endif
 
 NAMESPACE_BEGIN(CryptoPP)
 
@@ -62,6 +72,7 @@ Integer RWFunction::ApplyFunction(const Integer &in) const
 
 bool RWFunction::Validate(RandomNumberGenerator &rng, unsigned int level) const
 {
+	CRYPTOPP_UNUSED(rng), CRYPTOPP_UNUSED(level);
 	bool pass = true;
 	pass = pass && m_n > Integer::One() && m_n%8 == 5;
 	return pass;
@@ -93,12 +104,61 @@ void InvertibleRWFunction::GenerateRandom(RandomNumberGenerator &rng, const Name
 	if (modulusSize < 16)
 		throw InvalidArgument("InvertibleRWFunction: specified modulus length is too small");
 
-	const NameValuePairs &primeParam = MakeParametersForTwoPrimesOfEqualSize(modulusSize);
+	AlgorithmParameters primeParam = MakeParametersForTwoPrimesOfEqualSize(modulusSize);
 	m_p.GenerateRandom(rng, CombinedNameValuePairs(primeParam, MakeParameters("EquivalentTo", 3)("Mod", 8)));
 	m_q.GenerateRandom(rng, CombinedNameValuePairs(primeParam, MakeParameters("EquivalentTo", 7)("Mod", 8)));
 
 	m_n = m_p * m_q;
 	m_u = m_q.InverseMod(m_p);
+
+	Precompute();
+}
+
+void InvertibleRWFunction::Initialize(const Integer &n, const Integer &p, const Integer &q, const Integer &u)
+{
+	m_n = n; m_p = p; m_q = q; m_u = u;
+
+	Precompute();
+}
+
+void InvertibleRWFunction::PrecomputeTweakedRoots() const
+{
+	ModularArithmetic modp(m_p), modq(m_q);
+
+	#pragma omp parallel sections if(CRYPTOPP_RW_USE_OMP)
+	{
+		#pragma omp section
+			m_pre_2_9p = modp.Exponentiate(2, (9 * m_p - 11)/8);
+		#pragma omp section
+			m_pre_2_3q = modq.Exponentiate(2, (3 * m_q - 5)/8);
+		#pragma omp section
+			m_pre_q_p = modp.Exponentiate(m_q, m_p - 2);
+	}
+
+	m_precompute = true;
+}
+
+void InvertibleRWFunction::LoadPrecomputation(BufferedTransformation &bt)
+{
+	BERSequenceDecoder seq(bt);
+	m_pre_2_9p.BERDecode(seq);
+	m_pre_2_3q.BERDecode(seq);
+	m_pre_q_p.BERDecode(seq);
+	seq.MessageEnd();
+
+	m_precompute = true;
+}
+
+void InvertibleRWFunction::SavePrecomputation(BufferedTransformation &bt) const
+{
+	if(!m_precompute)
+		Precompute();
+
+	DERSequenceEncoder seq(bt);
+	m_pre_2_9p.DEREncode(seq);
+	m_pre_2_3q.DEREncode(seq);
+	m_pre_q_p.DEREncode(seq);
+	seq.MessageEnd();
 }
 
 void InvertibleRWFunction::BERDecode(BufferedTransformation &bt)
@@ -109,6 +169,8 @@ void InvertibleRWFunction::BERDecode(BufferedTransformation &bt)
 	m_q.BERDecode(seq);
 	m_u.BERDecode(seq);
 	seq.MessageEnd();
+
+	m_precompute = false;
 }
 
 void InvertibleRWFunction::DEREncode(BufferedTransformation &bt) const
@@ -121,26 +183,70 @@ void InvertibleRWFunction::DEREncode(BufferedTransformation &bt) const
 	seq.MessageEnd();
 }
 
-Integer InvertibleRWFunction::CalculateInverse(RandomNumberGenerator &rng, const Integer &in) const
+// DJB's "RSA signatures and Rabin-Williams signatures..." (http://cr.yp.to/sigs/rwsota-20080131.pdf).
+Integer InvertibleRWFunction::CalculateInverse(RandomNumberGenerator &rng, const Integer &x) const
 {
-	// no need to do blinding because RW is only used for signatures
-
 	DoQuickSanityCheck();
 
-	Integer cp=in%m_p, cq=in%m_q;
+	if(!m_precompute)
+		Precompute();
 
-	if (Jacobi(cp, m_p) * Jacobi(cq, m_q) != 1)
+	ModularArithmetic modn(m_n), modp(m_p), modq(m_q);
+	Integer r, rInv;
+
+	do
 	{
-		cp = cp%2 ? (cp+m_p) >> 1 : cp >> 1;
-		cq = cq%2 ? (cq+m_q) >> 1 : cq >> 1;
+		// Do this in a loop for people using small numbers for testing
+		r.Randomize(rng, Integer::One(), m_n - Integer::One());
+		// Fix for CVE-2015-2141. Thanks to Evgeny Sidorov for reporting.
+		// Squaring to satisfy Jacobi requirements suggested by Jean-Pierre Munch.
+		r = modn.Square(r);
+		rInv = modn.MultiplicativeInverse(r);
+	} while (rInv.IsZero());
+
+	Integer re = modn.Square(r);
+	re = modn.Multiply(re, x);    // blind
+
+	const Integer &h = re, &p = m_p, &q = m_q;
+	Integer e, f;
+
+	const Integer U = modq.Exponentiate(h, (q+1)/8);
+	if(((modq.Exponentiate(U, 4) - h) % q).IsZero())
+		e = Integer::One();
+	else
+		e = -1;
+
+	const Integer eh = e*h, V = modp.Exponentiate(eh, (p-3)/8);
+	if(((modp.Multiply(modp.Exponentiate(V, 4), modp.Exponentiate(eh, 2)) - eh) % p).IsZero())
+		f = Integer::One();
+	else
+		f = 2;
+
+	Integer W, X;
+	#pragma omp parallel sections if(CRYPTOPP_RW_USE_OMP)
+	{
+		#pragma omp section
+		{
+			W = (f.IsUnit() ? U : modq.Multiply(m_pre_2_3q, U));
+		}
+		#pragma omp section
+		{
+			const Integer t = modp.Multiply(modp.Exponentiate(V, 3), eh);
+			X = (f.IsUnit() ? t : modp.Multiply(m_pre_2_9p, t));
+		}
 	}
+	const Integer Y = W + q * modp.Multiply(m_pre_q_p, (X - W));
 
-	cp = ModularSquareRoot(cp, m_p);
-	cq = ModularSquareRoot(cq, m_q);
+	// Signature
+	Integer s = modn.Multiply(modn.Square(Y), rInv);
+	CRYPTOPP_ASSERT((e * f * s.Squared()) % m_n == x);
 
-	Integer out = CRT(cq, m_q, cp, m_p, m_u);
+	// IEEE P1363, Section 8.2.8 IFSP-RW, p.44
+	s = STDMIN(s, m_n - s);
+	if (ApplyFunction(s) != x)                      // check
+		throw Exception(Exception::OTHER_ERROR, "InvertibleRWFunction: computational error during private key operation");
 
-	return STDMIN(out, m_n-out);
+	return s;
 }
 
 bool InvertibleRWFunction::Validate(RandomNumberGenerator &rng, unsigned int level) const
@@ -175,6 +281,8 @@ void InvertibleRWFunction::AssignFrom(const NameValuePairs &source)
 		CRYPTOPP_SET_FUNCTION_ENTRY(Prime2)
 		CRYPTOPP_SET_FUNCTION_ENTRY(MultiplicativeInverseOfPrime2ModPrime1)
 		;
+
+	m_precompute = false;
 }
 
 NAMESPACE_END

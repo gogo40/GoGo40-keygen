@@ -2,15 +2,19 @@
 // any modifications are placed in the public domain
 
 #include "pch.h"
+#define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
 #include "md5.h"
 #include "misc.h"
 
 NAMESPACE_BEGIN(CryptoPP)
+namespace Weak1 {
 
+#if CRYPTOPP_DEBUG && !defined(CRYPTOPP_DOXYGEN_PROCESSING)
 void MD5_TestInstantiations()
 {
 	MD5 x;
 }
+#endif
 
 void MD5::InitState(HashWordType *state)
 {
@@ -112,4 +116,5 @@ void MD5::Transform (word32 *digest, const word32 *in)
 	digest[3]+=d;
 }
 
+}
 NAMESPACE_END
