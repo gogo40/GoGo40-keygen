@@ -13,22 +13,6 @@ CONFIG   += c++11
 TARGET = GoGo40-keygen
 TEMPLATE = app
 
-CONFIG += mobility
-MOBILITY =
-
-
-SOURCES += main.cpp\
-        keygen_widget.cpp \
-    keygen.cpp \
-    tests.cpp
-
-
-HEADERS  += keygen_widget.h \
-    keygen.h \
-    tests.h
-
-FORMS    += keygen_widget.ui
-
 
 win32-g++ | win32-msvc2015 | win32-msvc2013 | android {
     INCLUDEPATH += "$${PWD}" \
@@ -157,7 +141,21 @@ win_deps/fips140/zlib.cpp
 }
 
 
-ANDROID_PACKAGE_SOURCE_DIR = $$PWD/android
+SOURCES += main.cpp\
+        keygen_widget.cpp \
+    keygen.cpp \
+    tests.cpp
+
+
+HEADERS  += keygen_widget.h \
+    keygen.h \
+    tests.h
+
+FORMS    += keygen_widget.ui
+
+CONFIG += mobility
+MOBILITY =
+
 
 linux:!android: LIBS += -ldl -lcrypto++
 
@@ -171,4 +169,3 @@ DISTFILES += \
     android/gradlew.bat
 
 ANDROID_PACKAGE_SOURCE_DIR = $$PWD/android
-
