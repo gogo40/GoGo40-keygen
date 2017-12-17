@@ -1,22 +1,34 @@
-// specification file for an unlimited queue for storing bytes
+// queue.h - written and placed in the public domain by Wei Dai
+
+//! \file
+//! \headerfile queue.h
+//! \brief Classes for an unlimited queue to store bytes
 
 #ifndef CRYPTOPP_QUEUE_H
 #define CRYPTOPP_QUEUE_H
 
+#include "cryptlib.h"
 #include "simple.h"
-//#include <algorithm>
 
 NAMESPACE_BEGIN(CryptoPP)
 
-/** The queue is implemented as a linked list of byte arrays, but you don't need to
-    know about that.  So just ignore this next line. :) */
 class ByteQueueNode;
 
-//! Byte Queue
+//! \class ByteQueue
+//! \brief Data structure used to store byte strings
+//! \details The queue is implemented as a linked list of byte arrays
 class CRYPTOPP_DLL ByteQueue : public Bufferless<BufferedTransformation>
 {
 public:
+	//! \brief Construct a ByteQueue
+	//! \param nodeSize the initial node size
+	//! \details Internally, ByteQueue uses a ByteQueueNode to store bytes, and \p nodeSize determines the
+	//!   size of the ByteQueueNode. A value of 0 indicates the ByteQueueNode should be automatically sized,
+	//!   which means a value of 256 is used.
 	ByteQueue(size_t nodeSize=0);
+
+	//! \brief Copy construct a ByteQueue
+	//! \param copy the other ByteQueue
 	ByteQueue(const ByteQueue &copy);
 	~ByteQueue();
 
@@ -35,8 +47,8 @@ public:
 	size_t Peek(byte &outByte) const;
 	size_t Peek(byte *outString, size_t peekMax) const;
 
-	size_t TransferTo2(BufferedTransformation &target, lword &transferBytes, const std::string &channel=NULL_CHANNEL, bool blocking=true);
-	size_t CopyRangeTo2(BufferedTransformation &target, lword &begin, lword end=LWORD_MAX, const std::string &channel=NULL_CHANNEL, bool blocking=true) const;
+	size_t TransferTo2(BufferedTransformation &target, lword &transferBytes, const std::string &channel=DEFAULT_CHANNEL, bool blocking=true);
+	size_t CopyRangeTo2(BufferedTransformation &target, lword &begin, lword end=LWORD_MAX, const std::string &channel=DEFAULT_CHANNEL, bool blocking=true) const;
 
 	// these member functions are not inherited
 	void SetNodeSize(size_t nodeSize);
@@ -58,14 +70,20 @@ public:
 
 	ByteQueue & operator=(const ByteQueue &rhs);
 	bool operator==(const ByteQueue &rhs) const;
+	bool operator!=(const ByteQueue &rhs) const {return !operator==(rhs);}
 	byte operator[](lword i) const;
 	void swap(ByteQueue &rhs);
 
+	//! \class Walker
+	//! \brief A ByteQueue iterator
 	class Walker : public InputRejecting<BufferedTransformation>
 	{
 	public:
+		//! \brief Construct a ByteQueue Walker
+		//! \param queue a ByteQueue
 		Walker(const ByteQueue &queue)
-			: m_queue(queue) {Initialize();}
+			: m_queue(queue), m_node(NULL), m_position(0), m_offset(0), m_lazyString(NULL), m_lazyLength(0)
+				{Initialize();}
 
 		lword GetCurrentPosition() {return m_position;}
 
@@ -80,8 +98,8 @@ public:
 		size_t Peek(byte &outByte) const;
 		size_t Peek(byte *outString, size_t peekMax) const;
 
-		size_t TransferTo2(BufferedTransformation &target, lword &transferBytes, const std::string &channel=NULL_CHANNEL, bool blocking=true);
-		size_t CopyRangeTo2(BufferedTransformation &target, lword &begin, lword end=LWORD_MAX, const std::string &channel=NULL_CHANNEL, bool blocking=true) const;
+		size_t TransferTo2(BufferedTransformation &target, lword &transferBytes, const std::string &channel=DEFAULT_CHANNEL, bool blocking=true);
+		size_t CopyRangeTo2(BufferedTransformation &target, lword &begin, lword end=LWORD_MAX, const std::string &channel=DEFAULT_CHANNEL, bool blocking=true) const;
 
 	private:
 		const ByteQueue &m_queue;
@@ -114,7 +132,7 @@ public:
 	LazyPutter(ByteQueue &bq, const byte *inString, size_t size)
 		: m_bq(bq) {bq.LazyPut(inString, size);}
 	~LazyPutter()
-		{try {m_bq.FinalizeLazyPut();} catch(...) {}}
+		{try {m_bq.FinalizeLazyPut();} catch(const Exception&) {CRYPTOPP_ASSERT(0);}}
 protected:
 	LazyPutter(ByteQueue &bq) : m_bq(bq) {}
 private:
@@ -131,11 +149,13 @@ public:
 
 NAMESPACE_END
 
+#ifndef __BORLANDC__
 NAMESPACE_BEGIN(std)
 template<> inline void swap(CryptoPP::ByteQueue &a, CryptoPP::ByteQueue &b)
 {
 	a.swap(b);
 }
 NAMESPACE_END
+#endif
 
 #endif

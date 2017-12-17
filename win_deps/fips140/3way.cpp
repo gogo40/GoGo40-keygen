@@ -7,15 +7,22 @@
 
 NAMESPACE_BEGIN(CryptoPP)
 
+#if CRYPTOPP_DEBUG && !defined(CRYPTOPP_DOXYGEN_PROCESSING)
 void ThreeWay_TestInstantiations()
 {
 	ThreeWay::Encryption x1;
 	ThreeWay::Decryption x2;
 }
+#endif
 
-static const word32 START_E = 0x0b0b; // round constant of first encryption round
-static const word32 START_D = 0xb1b1; // round constant of first decryption round
-static const word32 RC_MODULUS = 0x11011;
+namespace
+{
+	const word32 START_E = 0x0b0b; // round constant of first encryption round
+	const word32 START_D = 0xb1b1; // round constant of first decryption round
+#ifdef CRYPTOPP_MAINTAIN_BACKWARDS_COMPATIBILITY_562
+	const word32 RC_MODULUS = 0x11011;
+#endif
+}
 
 static inline word32 reverseBits(word32 a)
 {
@@ -53,25 +60,24 @@ static inline word32 reverseBits(word32 a)
 	a0 ^= c ^ b0; 											\
 	a1 ^= c ^ b1; 											\
 	a2 ^= c ^ (b0 >> 16) ^ (b1 << 16); 						\
-}															
+}
 
 #define rho(a0, a1, a2)			\
 {								\
 	theta(a0, a1, a2);			\
 	pi_gamma_pi(a0, a1, a2);	\
-}											
+}
 
-void ThreeWay::Base::UncheckedSetKey(CipherDir dir, const byte *uk, unsigned int length, unsigned int r)
+void ThreeWay::Base::UncheckedSetKey(const byte *uk, unsigned int length, const NameValuePairs &params)
 {
 	AssertValidKeyLength(length);
-	AssertValidRounds(r);
 
-	m_rounds = r;
+	m_rounds = GetRoundsAndThrowIfInvalid(params, this);
 
 	for (unsigned int i=0; i<3; i++)
 		m_k[i] = (word32)uk[4*i+3] | ((word32)uk[4*i+2]<<8) | ((word32)uk[4*i+1]<<16) | ((word32)uk[4*i]<<24);
 
-	if (dir == DECRYPTION)
+	if (!IsForwardTransformation())
 	{
 		theta(m_k[0], m_k[1], m_k[2]);
 		mu(m_k[0], m_k[1], m_k[2]);

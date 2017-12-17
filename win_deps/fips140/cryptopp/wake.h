@@ -1,3 +1,8 @@
+// wake.h - written and placed in the public domain by Wei Dai
+
+//! \file wake.h
+//! \brief Classes for WAKE stream cipher
+
 #ifndef CRYPTOPP_WAKE_H
 #define CRYPTOPP_WAKE_H
 
@@ -7,18 +12,13 @@
 
 NAMESPACE_BEGIN(CryptoPP)
 
-//! _
-template <class B = BigEndian>
-struct WAKE_CFB_Info : public FixedKeyLength<32>
-{
-	static const char *StaticAlgorithmName() {return B::ToEnum() == LITTLE_ENDIAN_ORDER ? "WAKE-CFB-LE" : "WAKE-CFB-BE";}
-};
-
-//! _
+//! \class WAKE_OFB_Info
+//! \brief WAKE stream cipher information
+//! \tparam B Endianess of the stream cipher
 template <class B = BigEndian>
 struct WAKE_OFB_Info : public FixedKeyLength<32>
 {
-	static const char *StaticAlgorithmName() {return B::ToEnum() == LITTLE_ENDIAN_ORDER ? "WAKE-OFB-LE" : "WAKE-OFB-BE";}
+	CRYPTOPP_CONSTEXPR static const char *StaticAlgorithmName() {return B::ToEnum() == LITTLE_ENDIAN_ORDER ? "WAKE-OFB-LE" : "WAKE-OFB-BE";}
 };
 
 class CRYPTOPP_NO_VTABLE WAKE_Base
@@ -31,31 +31,22 @@ protected:
 	word32 r3, r4, r5, r6;
 };
 
+//! \class WAKE_Policy
+//! \brief WAKE stream cipher operation
+//! \tparam B Endianess of the stream cipher
 template <class B = BigEndian>
-class CRYPTOPP_NO_VTABLE WAKE_Policy
-				: public CFB_CipherConcretePolicy<word32, 1>
-				, public AdditiveCipherConcretePolicy<word32, 1, 64>
-				, protected WAKE_Base
+class CRYPTOPP_NO_VTABLE WAKE_Policy : public AdditiveCipherConcretePolicy<word32, 1, 64>, protected WAKE_Base
 {
 protected:
 	void CipherSetKey(const NameValuePairs &params, const byte *key, size_t length);
-	// CFB
-	byte * GetRegisterBegin() {return (byte *)&r6;}
-	void Iterate(byte *output, const byte *input, CipherDir dir, size_t iterationCount);
 	// OFB
 	void OperateKeystream(KeystreamOperation operation, byte *output, const byte *input, size_t iterationCount);
-	bool IsRandomAccess() const {return false;}
+	bool CipherIsRandomAccess() const {return false;}
 };
 
-//! <a href="http://www.weidai.com/scan-mirror/cs.html#WAKE-CFB-BE">WAKE-CFB-BE</a>
-template <class B = BigEndian>
-struct WAKE_CFB : public WAKE_CFB_Info<B>, public SymmetricCipherDocumentation
-{
-	typedef SymmetricCipherFinal<ConcretePolicyHolder<WAKE_Policy<B>, CFB_EncryptionTemplate<> >,  WAKE_CFB_Info<B> > Encryption;
-	typedef SymmetricCipherFinal<ConcretePolicyHolder<WAKE_Policy<B>, CFB_DecryptionTemplate<> >,  WAKE_CFB_Info<B> > Decryption;
-};
-
-//! WAKE-OFB
+//! \class WAKE_OFB
+//! \brief WAKE stream cipher
+//! \tparam B Endianess of the stream cipher
 template <class B = BigEndian>
 struct WAKE_OFB : public WAKE_OFB_Info<B>, public SymmetricCipherDocumentation
 {

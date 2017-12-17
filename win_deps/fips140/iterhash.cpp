@@ -1,6 +1,9 @@
 // iterhash.cpp - written and placed in the public domain by Wei Dai
 
-#include "pch.h"
+#ifndef __GNUC__
+#define CRYPTOPP_MANUALLY_INSTANTIATE_TEMPLATES
+#endif
+
 #include "iterhash.h"
 #include "misc.h"
 
@@ -15,23 +18,27 @@ template <class T, class BASE> void IteratedHashBase<T, BASE>::Update(const byte
 	if (m_countHi < oldCountHi || SafeRightShift<2*8*sizeof(HashWordType)>(len) != 0)
 		throw HashInputTooLong(this->AlgorithmName());
 
-	unsigned int blockSize = BlockSize();
+	const unsigned int blockSize = this->BlockSize();
 	unsigned int num = ModPowerOf2(oldCountLo, blockSize);
+
+	T* dataBuf = this->DataBuf();
+	byte* data = (byte *)dataBuf;
+	CRYPTOPP_ASSERT(dataBuf && data);
 
 	if (num != 0)	// process left over data
 	{
-		if ((num+len) >= blockSize)
+		if (num+len >= blockSize)
 		{
-			memcpy((byte *)m_data.begin()+num, input, blockSize-num);
-			HashBlock(m_data);
+			if (data && input) {memcpy(data+num, input, blockSize-num);}
+			HashBlock(dataBuf);
 			input += (blockSize-num);
-			len-=(blockSize - num);
-			num=0;
+			len -= (blockSize-num);
+			num = 0;
 			// drop through and do the rest
 		}
 		else
 		{
-			memcpy((byte *)m_data.begin()+num, input, len);
+			if (data && input && len) {memcpy(data+num, input, len);}
 			return;
 		}
 	}
@@ -39,51 +46,53 @@ template <class T, class BASE> void IteratedHashBase<T, BASE>::Update(const byte
 	// now process the input data in blocks of blockSize bytes and save the leftovers to m_data
 	if (len >= blockSize)
 	{
-		if (input == (byte *)m_data.begin())
+		if (input == data)
 		{
-			assert(len == blockSize);
-			HashBlock(m_data);
+			CRYPTOPP_ASSERT(len == blockSize);
+			HashBlock(dataBuf);
 			return;
 		}
 		else if (IsAligned<T>(input))
 		{
-			size_t leftOver = HashMultipleBlocks((T *)input, len);
+			size_t leftOver = HashMultipleBlocks((T *)(void*)input, len);
 			input += (len - leftOver);
 			len = leftOver;
 		}
 		else
 			do
 			{   // copy input first if it's not aligned correctly
-				memcpy(m_data, input, blockSize);
-				HashBlock(m_data);
+				if (data && input) memcpy(data, input, blockSize);
+				HashBlock(dataBuf);
 				input+=blockSize;
 				len-=blockSize;
 			} while (len >= blockSize);
 	}
 
-	memcpy(m_data, input, len);
+	if (data && input && len && data != input)
+		memcpy(data, input, len);
 }
 
 template <class T, class BASE> byte * IteratedHashBase<T, BASE>::CreateUpdateSpace(size_t &size)
 {
-	unsigned int blockSize = BlockSize();
+	unsigned int blockSize = this->BlockSize();
 	unsigned int num = ModPowerOf2(m_countLo, blockSize);
 	size = blockSize - num;
-	return (byte *)m_data.begin() + num;
+	return (byte *)DataBuf() + num;
 }
 
 template <class T, class BASE> size_t IteratedHashBase<T, BASE>::HashMultipleBlocks(const T *input, size_t length)
 {
-	unsigned int blockSize = BlockSize();
-	bool noReverse = NativeByteOrderIs(GetByteOrder());
+	unsigned int blockSize = this->BlockSize();
+	bool noReverse = NativeByteOrderIs(this->GetByteOrder());
+	T* dataBuf = this->DataBuf();
 	do
 	{
 		if (noReverse)
-			HashEndianCorrectedBlock(input);
+			this->HashEndianCorrectedBlock(input);
 		else
 		{
-			ByteReverse(this->m_data.begin(), input, this->BlockSize());
-			HashEndianCorrectedBlock(this->m_data);
+			ByteReverse(dataBuf, input, this->BlockSize());
+			this->HashEndianCorrectedBlock(dataBuf);
 		}
 
 		input += blockSize/sizeof(T);
@@ -95,16 +104,18 @@ template <class T, class BASE> size_t IteratedHashBase<T, BASE>::HashMultipleBlo
 
 template <class T, class BASE> void IteratedHashBase<T, BASE>::PadLastBlock(unsigned int lastBlockSize, byte padFirst)
 {
-	unsigned int blockSize = BlockSize();
+	unsigned int blockSize = this->BlockSize();
 	unsigned int num = ModPowerOf2(m_countLo, blockSize);
-	((byte *)m_data.begin())[num++]=padFirst;
+	T* dataBuf = this->DataBuf();
+	byte* data = (byte *)dataBuf;
+	data[num++] = padFirst;
 	if (num <= lastBlockSize)
-		memset((byte *)m_data.begin()+num, 0, lastBlockSize-num);
+		memset(data+num, 0, lastBlockSize-num);
 	else
 	{
-		memset((byte *)m_data.begin()+num, 0, blockSize-num);
-		HashBlock(m_data);
-		memset(m_data, 0, lastBlockSize);
+		memset(data+num, 0, blockSize-num);
+		HashBlock(dataBuf);
+		memset(data, 0, lastBlockSize);
 	}
 }
 
@@ -118,18 +129,34 @@ template <class T, class BASE> void IteratedHashBase<T, BASE>::TruncatedFinal(by
 {
 	this->ThrowIfInvalidTruncatedSize(size);
 
-	PadLastBlock(this->BlockSize() - 2*sizeof(HashWordType));
+	T* dataBuf = this->DataBuf();
+	T* stateBuf = this->StateBuf();
+	unsigned int blockSize = this->BlockSize();
 	ByteOrder order = this->GetByteOrder();
-	ConditionalByteReverse<HashWordType>(order, this->m_data, this->m_data, this->BlockSize() - 2*sizeof(HashWordType));
 
-	this->m_data[this->m_data.size()-2] = order ? this->GetBitCountHi() : this->GetBitCountLo();
-	this->m_data[this->m_data.size()-1] = order ? this->GetBitCountLo() : this->GetBitCountHi();
+	PadLastBlock(blockSize - 2*sizeof(HashWordType));
+	dataBuf[blockSize/sizeof(T)-2+order] = ConditionalByteReverse(order, this->GetBitCountLo());
+	dataBuf[blockSize/sizeof(T)-1-order] = ConditionalByteReverse(order, this->GetBitCountHi());
 
-	HashEndianCorrectedBlock(this->m_data);
-	ConditionalByteReverse<HashWordType>(order, this->m_digest, this->m_digest, this->DigestSize());
-	memcpy(digest, this->m_digest, size);
+	HashBlock(dataBuf);
+
+	if (IsAligned<HashWordType>(digest) && size%sizeof(HashWordType)==0)
+		ConditionalByteReverse<HashWordType>(order, (HashWordType *)(void*)digest, stateBuf, size);
+	else
+	{
+		ConditionalByteReverse<HashWordType>(order, stateBuf, stateBuf, this->DigestSize());
+		memcpy(digest, stateBuf, size);
+	}
 
 	this->Restart();		// reinit for next use
 }
+
+#ifdef __GNUC__
+	template class IteratedHashBase<word64, HashTransformation>;
+	template class IteratedHashBase<word64, MessageAuthenticationCode>;
+
+	template class IteratedHashBase<word32, HashTransformation>;
+	template class IteratedHashBase<word32, MessageAuthenticationCode>;
+#endif
 
 NAMESPACE_END

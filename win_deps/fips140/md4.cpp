@@ -8,17 +8,19 @@
  *
  * Part of the Python Cryptography Toolkit, version 1.1
  *
- * Distribute and use freely; there are no restrictions on further 
- * dissemination and usage except those imposed by the laws of your 
+ * Distribute and use freely; there are no restrictions on further
+ * dissemination and usage except those imposed by the laws of your
  * country of residence.
  *
  */
 
 #include "pch.h"
+#define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
 #include "md4.h"
 #include "misc.h"
 
 NAMESPACE_BEGIN(CryptoPP)
+namespace Weak1 {
 
 void MD4::InitState(HashWordType *state)
 {
@@ -42,7 +44,7 @@ void MD4::Transform (word32 *digest, const word32 *in)
 	C=digest[2];
 	D=digest[3];
 
-#define function(a,b,c,d,k,s) a=rotlFixed(a+F(b,c,d)+in[k],s);	 
+#define function(a,b,c,d,k,s) a=rotlFixed(a+F(b,c,d)+in[k],s);
 	  function(A,B,C,D, 0, 3);
 	  function(D,A,B,C, 1, 7);
 	  function(C,D,A,B, 2,11);
@@ -60,8 +62,8 @@ void MD4::Transform (word32 *digest, const word32 *in)
 	  function(C,D,A,B,14,11);
 	  function(B,C,D,A,15,19);
 
-#undef function	  
-#define function(a,b,c,d,k,s) a=rotlFixed(a+G(b,c,d)+in[k]+0x5a827999,s);	 
+#undef function
+#define function(a,b,c,d,k,s) a=rotlFixed(a+G(b,c,d)+in[k]+0x5a827999,s);
 	  function(A,B,C,D, 0, 3);
 	  function(D,A,B,C, 4, 5);
 	  function(C,D,A,B, 8, 9);
@@ -79,8 +81,8 @@ void MD4::Transform (word32 *digest, const word32 *in)
 	  function(C,D,A,B,11, 9);
 	  function(B,C,D,A,15,13);
 
-#undef function	 
-#define function(a,b,c,d,k,s) a=rotlFixed(a+H(b,c,d)+in[k]+0x6ed9eba1,s);	 
+#undef function
+#define function(a,b,c,d,k,s) a=rotlFixed(a+H(b,c,d)+in[k]+0x6ed9eba1,s);
 	  function(A,B,C,D, 0, 3);
 	  function(D,A,B,C, 8, 9);
 	  function(C,D,A,B, 4,11);
@@ -104,4 +106,5 @@ void MD4::Transform (word32 *digest, const word32 *in)
 	digest[3]+=D;
 }
 
+}
 NAMESPACE_END

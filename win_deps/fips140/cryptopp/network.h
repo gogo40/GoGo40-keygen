@@ -1,10 +1,13 @@
 #ifndef CRYPTOPP_NETWORK_H
 #define CRYPTOPP_NETWORK_H
 
+#include "config.h"
+
+#if !defined(NO_OS_DEPENDENCE) && defined(SOCKETS_AVAILABLE)
+
 #include "filters.h"
 #include "hrtimer.h"
-
-#include <deque>
+#include "stdcpp.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
@@ -32,9 +35,9 @@ public:
 	/*! GetWaitObjects() must be called despite the 0 return from GetMaxWaitObjectCount();
 	    the 0 is because the ScheduleEvent() method is used instead of adding a wait object */
 	unsigned int GetMaxWaitObjectCount() const { return 0; }
-	void GetWaitObjects(WaitObjectContainer &container, CallStack const& callStack);
+	void GetWaitObjects(WaitObjectContainer &container, const CallStack &callStack);
 
-private:	
+private:
 	lword m_maxBytesPerSecond;
 
 	typedef std::deque<std::pair<double, lword> > OpQueue;
@@ -157,8 +160,6 @@ public:
 	virtual bool EofSent() {return false;}	// implement if MustWaitForEof() == true
 };
 
-#ifdef HIGHRES_TIMER_AVAILABLE
-
 //! Network Source
 class CRYPTOPP_NO_VTABLE NetworkSource : public NonblockingSource
 {
@@ -226,8 +227,8 @@ private:
 	float m_byteCountSinceLastTimerReset, m_currentSpeed, m_maxObservedSpeed;
 };
 
-#endif	// #ifdef HIGHRES_TIMER_AVAILABLE
-
 NAMESPACE_END
 
-#endif
+#endif	// SOCKETS_AVAILABLE
+
+#endif  // CRYPTOPP_NETWORK_H

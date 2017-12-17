@@ -2,7 +2,8 @@
 #define CRYPTOPP_OBJFACT_H
 
 #include "cryptlib.h"
-#include <map>
+#include "misc.h"
+#include "stdcpp.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
@@ -11,6 +12,7 @@ template <class AbstractClass>
 class ObjectFactory
 {
 public:
+	virtual ~ObjectFactory () {}
 	virtual AbstractClass * CreateObject() const =0;
 };
 
@@ -23,7 +25,6 @@ public:
 	{
 		return new ConcreteClass;
 	}
-	
 };
 
 //! _
@@ -65,8 +66,18 @@ public:
 		return factory->CreateObject();
 	}
 
-	// VC60 workaround: use "..." to prevent this function from being inlined
-	static ObjectFactoryRegistry<AbstractClass, instance> & Registry(...);
+	// Return a vector containing the factory names. This is easier than returning an iterator.
+	// from Andrew Pitonyak
+	std::vector<std::string> GetFactoryNames() const
+	{
+		std::vector<std::string> names;
+		CPP_TYPENAME Map::const_iterator iter;
+		for (iter = m_map.begin(); iter != m_map.end(); ++iter)
+			names.push_back(iter->first);
+		return names;
+	}
+
+	CRYPTOPP_NOINLINE static ObjectFactoryRegistry<AbstractClass, instance> & Registry(CRYPTOPP_NOINLINE_DOTDOTDOT);
 
 private:
 	// use void * instead of ObjectFactory<AbstractClass> * to save code size
@@ -75,7 +86,7 @@ private:
 };
 
 template <class AbstractClass, int instance>
-ObjectFactoryRegistry<AbstractClass, instance> & ObjectFactoryRegistry<AbstractClass, instance>::Registry(...)
+ObjectFactoryRegistry<AbstractClass, instance> & ObjectFactoryRegistry<AbstractClass, instance>::Registry(CRYPTOPP_NOINLINE_DOTDOTDOT)
 {
 	static ObjectFactoryRegistry<AbstractClass, instance> s_registry;
 	return s_registry;
@@ -85,13 +96,16 @@ template <class AbstractClass, class ConcreteClass, int instance = 0>
 struct RegisterDefaultFactoryFor {
 RegisterDefaultFactoryFor(const char *name=NULL)
 {
+	// BCB2006 workaround
+	std::string n = name ? std::string(name) : std::string(ConcreteClass::StaticAlgorithmName());
 	ObjectFactoryRegistry<AbstractClass, instance>::Registry().
-		RegisterFactory(name ? name : ConcreteClass::StaticAlgorithmName(), new DefaultObjectFactory<AbstractClass, ConcreteClass>);
+		RegisterFactory(n, new DefaultObjectFactory<AbstractClass, ConcreteClass>);
 }};
 
 template <class SchemeClass>
 void RegisterAsymmetricCipherDefaultFactories(const char *name=NULL, SchemeClass *dummy=NULL)
 {
+	CRYPTOPP_UNUSED(dummy);
 	RegisterDefaultFactoryFor<PK_Encryptor, CPP_TYPENAME SchemeClass::Encryptor>((const char *)name);
 	RegisterDefaultFactoryFor<PK_Decryptor, CPP_TYPENAME SchemeClass::Decryptor>((const char *)name);
 }
@@ -99,6 +113,7 @@ void RegisterAsymmetricCipherDefaultFactories(const char *name=NULL, SchemeClass
 template <class SchemeClass>
 void RegisterSignatureSchemeDefaultFactories(const char *name=NULL, SchemeClass *dummy=NULL)
 {
+	CRYPTOPP_UNUSED(dummy);
 	RegisterDefaultFactoryFor<PK_Signer, CPP_TYPENAME SchemeClass::Signer>((const char *)name);
 	RegisterDefaultFactoryFor<PK_Verifier, CPP_TYPENAME SchemeClass::Verifier>((const char *)name);
 }
@@ -106,8 +121,17 @@ void RegisterSignatureSchemeDefaultFactories(const char *name=NULL, SchemeClass 
 template <class SchemeClass>
 void RegisterSymmetricCipherDefaultFactories(const char *name=NULL, SchemeClass *dummy=NULL)
 {
+	CRYPTOPP_UNUSED(dummy);
 	RegisterDefaultFactoryFor<SymmetricCipher, CPP_TYPENAME SchemeClass::Encryption, ENCRYPTION>((const char *)name);
 	RegisterDefaultFactoryFor<SymmetricCipher, CPP_TYPENAME SchemeClass::Decryption, DECRYPTION>((const char *)name);
+}
+
+template <class SchemeClass>
+void RegisterAuthenticatedSymmetricCipherDefaultFactories(const char *name=NULL, SchemeClass *dummy=NULL)
+{
+	CRYPTOPP_UNUSED(dummy);
+	RegisterDefaultFactoryFor<AuthenticatedSymmetricCipher, CPP_TYPENAME SchemeClass::Encryption, ENCRYPTION>((const char *)name);
+	RegisterDefaultFactoryFor<AuthenticatedSymmetricCipher, CPP_TYPENAME SchemeClass::Decryption, DECRYPTION>((const char *)name);
 }
 
 NAMESPACE_END

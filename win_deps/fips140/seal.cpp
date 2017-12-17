@@ -2,18 +2,20 @@
 // updated to SEAL 3.0 by Leonard Janke
 
 #include "pch.h"
+
 #include "seal.h"
 #include "sha.h"
 #include "misc.h"
-
-#include "strciphr.cpp"
+#include "secblock.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
+#if CRYPTOPP_DEBUG && !defined(CRYPTOPP_DOXYGEN_PROCESSING)
 void SEAL_TestInstantiations()
 {
 	SEAL<>::Encryption x;
 }
+#endif
 
 struct SEAL_Gamma
 {
@@ -46,6 +48,7 @@ word32 SEAL_Gamma::Apply(word32 i)
 template <class B>
 void SEAL_Policy<B>::CipherSetKey(const NameValuePairs &params, const byte *key, size_t length)
 {
+	CRYPTOPP_UNUSED(length);
 	m_insideCounter = m_outsideCounter = m_startCount = 0;
 
 	unsigned int L = params.GetIntValueWithDefault("NumberOfOutputBitsPerPositionIndex", 32*1024);
@@ -67,9 +70,12 @@ void SEAL_Policy<B>::CipherSetKey(const NameValuePairs &params, const byte *key,
 }
 
 template <class B>
-void SEAL_Policy<B>::CipherResynchronize(byte *keystreamBuffer, const byte *IV)
+void SEAL_Policy<B>::CipherResynchronize(byte *keystreamBuffer, const byte *IV, size_t length)
 {
-	m_outsideCounter = IV ? UnalignedGetWord<word32>(BIG_ENDIAN_ORDER, IV) : 0;
+	CRYPTOPP_UNUSED(keystreamBuffer), CRYPTOPP_UNUSED(IV), CRYPTOPP_UNUSED(length);
+	CRYPTOPP_ASSERT(length==4);
+
+	m_outsideCounter = IV ? GetWord<word32>(false, BIG_ENDIAN_ORDER, IV) : 0;
 	m_startCount = m_outsideCounter;
 	m_insideCounter = 0;
 }
@@ -84,13 +90,13 @@ void SEAL_Policy<B>::SeekToIteration(lword iterationCount)
 template <class B>
 void SEAL_Policy<B>::OperateKeystream(KeystreamOperation operation, byte *output, const byte *input, size_t iterationCount)
 {
-	KeystreamOutput<B> keystreamOutput(operation, output, input);
 	word32 a, b, c, d, n1, n2, n3, n4;
 	unsigned int p, q;
 
+	CRYPTOPP_ASSERT(IsAlignedOn(m_T.begin(),GetAlignmentOf<word32>()));
 	for (size_t iteration = 0; iteration < iterationCount; ++iteration)
 	{
-#define Ttab(x) *(word32 *)((byte *)m_T.begin()+x)
+		#define Ttab(x) *(word32 *)(void*)((byte *)m_T.begin()+x)
 
 		a = m_outsideCounter ^ m_R[4*m_insideCounter];
 		b = rotrFixed(m_outsideCounter, 8U) ^ m_R[4*m_insideCounter+1];
@@ -133,7 +139,7 @@ void SEAL_Policy<B>::OperateKeystream(KeystreamOperation operation, byte *output
 		p = d & 0x7fc;
 		a += Ttab(p);
 		d = rotrFixed(d, 9U);
-		
+
 		// generate 8192 bits
 		for (unsigned int i=0; i<64; i++)
 		{
@@ -173,10 +179,13 @@ void SEAL_Policy<B>::OperateKeystream(KeystreamOperation operation, byte *output
 			d = rotrFixed(d, 9U);
 			a += Ttab(q);
 
-			keystreamOutput	(b + m_S[4*i+0])
-							(c ^ m_S[4*i+1])
-							(d + m_S[4*i+2])
-							(a ^ m_S[4*i+3]);
+#define SEAL_OUTPUT(x)	\
+	CRYPTOPP_KEYSTREAM_OUTPUT_WORD(x, B::ToEnum(), 0, b + m_S[4*i+0]);\
+	CRYPTOPP_KEYSTREAM_OUTPUT_WORD(x, B::ToEnum(), 1, c ^ m_S[4*i+1]);\
+	CRYPTOPP_KEYSTREAM_OUTPUT_WORD(x, B::ToEnum(), 2, d + m_S[4*i+2]);\
+	CRYPTOPP_KEYSTREAM_OUTPUT_WORD(x, B::ToEnum(), 3, a ^ m_S[4*i+3]);
+
+			CRYPTOPP_KEYSTREAM_OUTPUT_SWITCH(SEAL_OUTPUT, 4*4);
 
 			if (i & 1)
 			{
@@ -188,7 +197,7 @@ void SEAL_Policy<B>::OperateKeystream(KeystreamOperation operation, byte *output
 			else
 			{
 				a += n1;
-				b += n2;        
+				b += n2;
 				c ^= n1;
 				d ^= n2;
 			}

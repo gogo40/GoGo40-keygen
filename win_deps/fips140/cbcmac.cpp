@@ -6,7 +6,7 @@
 
 NAMESPACE_BEGIN(CryptoPP)
 
-void CBC_MAC_Base::CheckedSetKey(void *, Empty empty, const byte *key, size_t length, const NameValuePairs &params)
+void CBC_MAC_Base::UncheckedSetKey(const byte *key, unsigned int length, const NameValuePairs &params)
 {
 	AccessCipher().SetKey(key, length, params);
 	m_reg.CleanNew(AccessCipher().BlockSize());
@@ -25,12 +25,11 @@ void CBC_MAC_Base::Update(const byte *input, size_t length)
 		length--;
 	}
 
-	while (length >= blockSize)
+	if (length >= blockSize)
 	{
-		xorbuf(m_reg, input, blockSize);
-		ProcessBuf();
-		input += blockSize;
-		length -= blockSize;
+		size_t leftOver = AccessCipher().AdvancedProcessBlocks(m_reg, input, m_reg, length, BlockTransformation::BT_DontIncrementInOutPointers|BlockTransformation::BT_XorInput);
+		input += (length - leftOver);
+		length = leftOver;
 	}
 
 	while (length--)

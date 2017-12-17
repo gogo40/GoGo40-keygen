@@ -1,10 +1,13 @@
 // pubkey.cpp - written and placed in the public domain by Wei Dai
 
 #include "pch.h"
+#include "config.h"
 
 #ifndef CRYPTOPP_IMPORTS
 
 #include "pubkey.h"
+#include "integer.h"
+#include "filters.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
@@ -28,7 +31,7 @@ bool PK_DeterministicSignatureMessageEncodingMethod::VerifyMessageRepresentative
 {
 	SecByteBlock computedRepresentative(BitsToBytes(representativeBitLength));
 	ComputeMessageRepresentative(NullRNG(), NULL, 0, hash, hashIdentifier, messageEmpty, computedRepresentative, representativeBitLength);
-	return memcmp(representative, computedRepresentative, computedRepresentative.size()) == 0;
+	return VerifyBufsEqual(representative, computedRepresentative, computedRepresentative.size());
 }
 
 bool PK_RecoverableSignatureMessageEncodingMethod::VerifyMessageRepresentative(
@@ -59,13 +62,15 @@ void TF_SignerBase::InputRecoverableMessage(PK_MessageAccumulator &messageAccumu
 
 	ma.m_recoverableMessage.Assign(recoverableMessage, recoverableMessageLength);
 	encoding.ProcessRecoverableMessage(
-		ma.AccessHash(), 
+		ma.AccessHash(),
 		recoverableMessage, recoverableMessageLength,
 		NULL, 0, ma.m_semisignature);
 }
 
 size_t TF_SignerBase::SignAndRestart(RandomNumberGenerator &rng, PK_MessageAccumulator &messageAccumulator, byte *signature, bool restart) const
 {
+	CRYPTOPP_UNUSED(restart);
+
 	PK_MessageAccumulatorBase &ma = static_cast<PK_MessageAccumulatorBase &>(messageAccumulator);
 	HashIdentifier id = GetHashIdentifier();
 	const MessageEncodingInterface &encoding = GetMessageEncodingInterface();
@@ -74,8 +79,8 @@ size_t TF_SignerBase::SignAndRestart(RandomNumberGenerator &rng, PK_MessageAccum
 		throw PK_SignatureScheme::KeyTooShort();
 
 	SecByteBlock representative(MessageRepresentativeLength());
-	encoding.ComputeMessageRepresentative(rng, 
-		ma.m_recoverableMessage, ma.m_recoverableMessage.size(), 
+	encoding.ComputeMessageRepresentative(rng,
+		ma.m_recoverableMessage, ma.m_recoverableMessage.size(),
 		ma.AccessHash(), id, ma.m_empty,
 		representative, MessageRepresentativeBitLength());
 	ma.m_empty = true;
@@ -134,8 +139,11 @@ DecodingResult TF_VerifierBase::RecoverAndRestart(byte *recoveredMessage, PK_Mes
 
 DecodingResult TF_DecryptorBase::Decrypt(RandomNumberGenerator &rng, const byte *ciphertext, size_t ciphertextLength, byte *plaintext, const NameValuePairs &parameters) const
 {
+	if (ciphertextLength != FixedCiphertextLength())
+			throw InvalidArgument(AlgorithmName() + ": ciphertext length of " + IntToString(ciphertextLength) + " doesn't match the required length of " + IntToString(FixedCiphertextLength()) + " for this key");
+
 	SecByteBlock paddedBlock(PaddedBlockByteLength());
-	Integer x = GetTrapdoorFunctionInterface().CalculateInverse(rng, Integer(ciphertext, FixedCiphertextLength()));
+	Integer x = GetTrapdoorFunctionInterface().CalculateInverse(rng, Integer(ciphertext, ciphertextLength));
 	if (x.ByteCount() > paddedBlock.size())
 		x = Integer::Zero();	// don't return false here to prevent timing attack
 	x.Encode(paddedBlock, paddedBlock.size());
@@ -145,7 +153,12 @@ DecodingResult TF_DecryptorBase::Decrypt(RandomNumberGenerator &rng, const byte 
 void TF_EncryptorBase::Encrypt(RandomNumberGenerator &rng, const byte *plaintext, size_t plaintextLength, byte *ciphertext, const NameValuePairs &parameters) const
 {
 	if (plaintextLength > FixedMaxPlaintextLength())
-		throw InvalidArgument(AlgorithmName() + ": message too long for this public key");
+	{
+		if (FixedMaxPlaintextLength() < 1)
+			throw InvalidArgument(AlgorithmName() + ": this key is too short to encrypt any messages");
+		else
+			throw InvalidArgument(AlgorithmName() + ": message length of " + IntToString(plaintextLength) + " exceeds the maximum of " + IntToString(FixedMaxPlaintextLength()) + " for this public key");
+	}
 
 	SecByteBlock paddedBlock(PaddedBlockByteLength());
 	GetMessageEncodingInterface().Pad(rng, plaintext, plaintextLength, paddedBlock, PaddedBlockBitLength(), parameters);

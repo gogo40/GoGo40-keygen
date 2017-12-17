@@ -1,8 +1,11 @@
 #ifndef CRYPTOPP_MQUEUE_H
 #define CRYPTOPP_MQUEUE_H
 
+#include "cryptlib.h"
 #include "queue.h"
 #include "filters.h"
+#include "misc.h"
+
 #include <deque>
 
 NAMESPACE_BEGIN(CryptoPP)
@@ -17,6 +20,7 @@ public:
 		{m_queue.IsolatedInitialize(parameters); m_lengths.assign(1, 0U); m_messageCounts.assign(1, 0U);}
 	size_t Put2(const byte *begin, size_t length, int messageEnd, bool blocking)
 	{
+		CRYPTOPP_UNUSED(blocking);
 		m_queue.Put(begin, length);
 		m_lengths.back() += length;
 		if (messageEnd)
@@ -26,17 +30,18 @@ public:
 		}
 		return 0;
 	}
-	bool IsolatedFlush(bool hardFlush, bool blocking) {return false;}
+	bool IsolatedFlush(bool hardFlush, bool blocking)
+		{CRYPTOPP_UNUSED(hardFlush), CRYPTOPP_UNUSED(blocking); return false;}
 	bool IsolatedMessageSeriesEnd(bool blocking)
-		{m_messageCounts.push_back(0); return false;}
+		{CRYPTOPP_UNUSED(blocking); m_messageCounts.push_back(0); return false;}
 
 	lword MaxRetrievable() const
 		{return m_lengths.front();}
 	bool AnyRetrievable() const
 		{return m_lengths.front() > 0;}
 
-	size_t TransferTo2(BufferedTransformation &target, lword &transferBytes, const std::string &channel=NULL_CHANNEL, bool blocking=true);
-	size_t CopyRangeTo2(BufferedTransformation &target, lword &begin, lword end=LWORD_MAX, const std::string &channel=NULL_CHANNEL, bool blocking=true) const;
+	size_t TransferTo2(BufferedTransformation &target, lword &transferBytes, const std::string &channel=DEFAULT_CHANNEL, bool blocking=true);
+	size_t CopyRangeTo2(BufferedTransformation &target, lword &begin, lword end=LWORD_MAX, const std::string &channel=DEFAULT_CHANNEL, bool blocking=true) const;
 
 	lword TotalBytesRetrievable() const
 		{return m_queue.MaxRetrievable();}
@@ -49,7 +54,7 @@ public:
 	unsigned int NumberOfMessageSeries() const
 		{return (unsigned int)m_messageCounts.size()-1;}
 
-	unsigned int CopyMessagesTo(BufferedTransformation &target, unsigned int count=UINT_MAX, const std::string &channel=NULL_CHANNEL) const;
+	unsigned int CopyMessagesTo(BufferedTransformation &target, unsigned int count=UINT_MAX, const std::string &channel=DEFAULT_CHANNEL) const;
 
 	const byte * Spy(size_t &contiguousSize) const;
 
@@ -88,11 +93,13 @@ private:
 
 NAMESPACE_END
 
+#ifndef __BORLANDC__
 NAMESPACE_BEGIN(std)
 template<> inline void swap(CryptoPP::MessageQueue &a, CryptoPP::MessageQueue &b)
 {
 	a.swap(b);
 }
 NAMESPACE_END
+#endif
 
 #endif

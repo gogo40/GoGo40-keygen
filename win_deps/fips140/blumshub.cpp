@@ -2,15 +2,16 @@
 
 #include "pch.h"
 #include "blumshub.h"
+#include "integer.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
 PublicBlumBlumShub::PublicBlumBlumShub(const Integer &n, const Integer &seed)
 	: modn(n),
-	  maxBits(BitPrecision(n.BitCount())-1)
+	  current(modn.Square(modn.Square(seed))),
+	  maxBits(BitPrecision(n.BitCount())-1),
+	  bitsLeft(maxBits)
 {
-	current = modn.Square(modn.Square(seed));
-	bitsLeft = maxBits;
 }
 
 unsigned int PublicBlumBlumShub::GenerateBit()
@@ -28,8 +29,20 @@ byte PublicBlumBlumShub::GenerateByte()
 {
 	byte b=0;
 	for (int i=0; i<8; i++)
-		b = (b << 1) | PublicBlumBlumShub::GenerateBit();
+		b = byte((b << 1) | PublicBlumBlumShub::GenerateBit());
 	return b;
+}
+
+void PublicBlumBlumShub::GenerateBlock(byte *output, size_t size)
+{
+	while (size--)
+		*output++ = PublicBlumBlumShub::GenerateByte();
+}
+
+void PublicBlumBlumShub::ProcessData(byte *outString, const byte *inString, size_t length)
+{
+	while (length--)
+		*outString++ = *inString++ ^ PublicBlumBlumShub::GenerateByte();
 }
 
 BlumBlumShub::BlumBlumShub(const Integer &p, const Integer &q, const Integer &seed)
