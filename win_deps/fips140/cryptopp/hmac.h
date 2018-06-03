@@ -1,5 +1,8 @@
 // hmac.h - written and placed in the public domain by Wei Dai
 
+//! \file hmac.h
+//! \brief Classes for HMAC message authentication codes
+
 #ifndef CRYPTOPP_HMAC_H
 #define CRYPTOPP_HMAC_H
 
@@ -8,12 +11,15 @@
 
 NAMESPACE_BEGIN(CryptoPP)
 
-//! _
-class CRYPTOPP_DLL CRYPTOPP_NO_VTABLE HMAC_Base : public VariableKeyLength<16, 0, UINT_MAX>, public MessageAuthenticationCode
+//! \class HMAC_Base
+//! \brief HMAC information
+//! \details HMAC_Base derives from VariableKeyLength and MessageAuthenticationCode
+class CRYPTOPP_DLL CRYPTOPP_NO_VTABLE HMAC_Base : public VariableKeyLength<16, 0, INT_MAX>, public MessageAuthenticationCode
 {
 public:
+	//! \brief Construct a HMAC_Base
 	HMAC_Base() : m_innerHashKeyed(false) {}
-	void UncheckedSetKey(const byte *userKey, unsigned int keylength);
+	void UncheckedSetKey(const byte *userKey, unsigned int keylength, const NameValuePairs &params);
 
 	void Restart();
 	void Update(const byte *input, size_t length);
@@ -23,27 +29,35 @@ public:
 
 protected:
 	virtual HashTransformation & AccessHash() =0;
-	virtual byte * AccessIpad() =0;
-	virtual byte * AccessOpad() =0;
-	virtual byte * AccessInnerHash() =0;
+	byte * AccessIpad() {return m_buf;}
+	byte * AccessOpad() {return m_buf + AccessHash().BlockSize();}
+	byte * AccessInnerHash() {return m_buf + 2*AccessHash().BlockSize();}
 
 private:
 	void KeyInnerHash();
 
-	enum {IPAD=0x36, OPAD=0x5c};
-
+	SecByteBlock m_buf;
 	bool m_innerHashKeyed;
 };
 
-//! <a href="http://www.weidai.com/scan-mirror/mac.html#HMAC">HMAC</a>
-/*! HMAC(K, text) = H(K XOR opad, H(K XOR ipad, text)) */
+//! \class HMAC
+//! \brief HMAC
+//! \tparam T HashTransformation derived class
+//! \details HMAC derives from MessageAuthenticationCodeImpl. It calculates the HMAC using
+//!   <tt>HMAC(K, text) = H(K XOR opad, H(K XOR ipad, text))</tt>.
+//! \sa <a href="http://www.weidai.com/scan-mirror/mac.html#HMAC">HMAC</a>
 template <class T>
 class HMAC : public MessageAuthenticationCodeImpl<HMAC_Base, HMAC<T> >
 {
 public:
-	enum {DIGESTSIZE=T::DIGESTSIZE, BLOCKSIZE=T::BLOCKSIZE};
+	CRYPTOPP_CONSTANT(DIGESTSIZE=T::DIGESTSIZE)
+	CRYPTOPP_CONSTANT(BLOCKSIZE=T::BLOCKSIZE)
 
+	//! \brief Construct a HMAC
 	HMAC() {}
+	//! \brief Construct a HMAC
+	//! \param key the HMAC key
+	//! \param length the size of the HMAC key
 	HMAC(const byte *key, size_t length=HMAC_Base::DEFAULT_KEYLENGTH)
 		{this->SetKey(key, length);}
 
@@ -52,12 +66,7 @@ public:
 
 private:
 	HashTransformation & AccessHash() {return m_hash;}
-	byte * AccessIpad() {return m_ipad;}
-	byte * AccessOpad() {return m_opad;}
-	byte * AccessInnerHash() {return m_innerHash;}
 
-	FixedSizeSecBlock<byte, BLOCKSIZE> m_ipad, m_opad;
-	FixedSizeSecBlock<byte, DIGESTSIZE> m_innerHash;
 	T m_hash;
 };
 

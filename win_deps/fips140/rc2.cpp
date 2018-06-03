@@ -3,12 +3,17 @@
 #include "pch.h"
 #include "rc2.h"
 #include "misc.h"
+#include "argnames.h"
 
 NAMESPACE_BEGIN(CryptoPP)
 
-void RC2::Base::UncheckedSetKey(CipherDir direction, const byte *key, unsigned int keyLen, unsigned int effectiveLen)
+void RC2::Base::UncheckedSetKey(const byte *key, unsigned int keyLen, const NameValuePairs &params)
 {
 	AssertValidKeyLength(keyLen);
+
+	int effectiveLen = params.GetIntValueWithDefault(Name::EffectiveKeyLength(), DEFAULT_EFFECTIVE_KEYLENGTH);
+	if (effectiveLen > MAX_EFFECTIVE_KEYLENGTH)
+		throw InvalidArgument("RC2: effective key length parameter exceeds maximum");
 
 	static const unsigned char PITABLE[256] = {
 		217,120,249,196, 25,221,181,237, 40,233,253,121, 74,160,216,157,
@@ -36,7 +41,7 @@ void RC2::Base::UncheckedSetKey(CipherDir direction, const byte *key, unsigned i
 		L[i] = PITABLE[(L[i-1] + L[i-keyLen]) & 255];
 
 	unsigned int T8 = (effectiveLen+7) / 8;
-	byte TM = 255 >> ((8-(effectiveLen%8))%8);
+	byte TM = byte((int)255 >> ((8-(effectiveLen%8))%8));
 	L[128-T8] = PITABLE[L[128-T8] & TM];
 
 	for (i=127-T8; i>=0; i--)
@@ -44,13 +49,6 @@ void RC2::Base::UncheckedSetKey(CipherDir direction, const byte *key, unsigned i
 
 	for (i=0; i<64; i++)
 		K[i] = L[2*i] + (L[2*i+1] << 8);
-}
-
-void RC2::Base::SetKeyWithEffectiveKeyLength(const byte *key, size_t length, unsigned int effectiveKeyLength)
-{
-	if (effectiveKeyLength > MAX_EFFECTIVE_KEYLENGTH)
-		throw InvalidArgument("RC2: effective key length parameter exceeds maximum");
-	UncheckedSetKey(ENCRYPTION, key, (unsigned int)length, effectiveKeyLength);
 }
 
 typedef BlockGetAndPut<word16, LittleEndian> Block;
@@ -76,10 +74,10 @@ void RC2::Enc::ProcessAndXorBlock(const byte *inBlock, const byte *xorBlock, byt
 
 		if (i == 4 || i == 10)
 		{
-			R0 += K[R3 & 63];
-			R1 += K[R0 & 63];
-			R2 += K[R1 & 63];
-			R3 += K[R2 & 63];
+			R0 = word16(R0 + K[R3 & 63]);
+			R1 = word16(R1 + K[R0 & 63]);
+			R2 = word16(R2 + K[R1 & 63]);
+			R3 = word16(R3 + K[R2 & 63]);
 		}
 	}
 
@@ -95,23 +93,23 @@ void RC2::Dec::ProcessAndXorBlock(const byte *inBlock, const byte *xorBlock, byt
 	{
 		if (i == 4 || i == 10)
 		{
-			R3 -= K[R2 & 63];
-			R2 -= K[R1 & 63];
-			R1 -= K[R0 & 63];
-			R0 -= K[R3 & 63];
+			R3 = word16(R3 - K[R2 & 63]);
+			R2 = word16(R2 - K[R1 & 63]);
+			R1 = word16(R1 - K[R0 & 63]);
+			R0 = word16(R0 - K[R3 & 63]);
 		}
 
 		R3 = rotrFixed(R3, 5);
-		R3 -= (R0 & ~R2) + (R1 & R2) + K[4*i+3];
+		R3 = word16(R3 - ((R0 & ~R2) + (R1 & R2) + K[4*i+3]));
 
 		R2 = rotrFixed(R2, 3);
-		R2 -= (R3 & ~R1) + (R0 & R1) + K[4*i+2];
+		R2 = word16(R2 - ((R3 & ~R1) + (R0 & R1) + K[4*i+2]));
 
 		R1 = rotrFixed(R1, 2);
-		R1 -= (R2 & ~R0) + (R3 & R0) + K[4*i+1];
+		R1 = word16(R1 - ((R2 & ~R0) + (R3 & R0) + K[4*i+1]));
 
 		R0 = rotrFixed(R0, 1);
-		R0 -= (R1 & ~R3) + (R2 & R3) + K[4*i+0];
+		R0 = word16(R0 - ((R1 & ~R3) + (R2 & R3) + K[4*i+0]));
 	}
 
 	Block::Put(xorBlock, outBlock)(R0)(R1)(R2)(R3);

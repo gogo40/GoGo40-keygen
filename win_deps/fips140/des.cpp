@@ -70,8 +70,8 @@ inline void FPERM(word32 &left, word32 &right)
 }
 */
 
-// Wei Dai's modification to Richard Outerbridge's initial permutation 
-// algorithm, this one is faster if you have access to rotate instructions 
+// Wei Dai's modification to Richard Outerbridge's initial permutation
+// algorithm, this one is faster if you have access to rotate instructions
 // (like in MSVC)
 static inline void IPERM(word32 &left, word32 &right)
 {
@@ -115,6 +115,13 @@ static inline void FPERM(word32 &left, word32 &right)
 	work = (left ^ right) & 0xf0f0f0f0;
 	right ^= work;
 	left = rotrFixed(left^work, 4U);
+}
+
+void DES::Base::UncheckedSetKey(const byte *userKey, unsigned int length, const NameValuePairs &)
+{
+	AssertValidKeyLength(length);
+
+	RawSetKey(GetCipherDirection(), userKey);
 }
 
 #ifndef CRYPTOPP_IMPORTS
@@ -214,7 +221,8 @@ static byte sbox[8][64] = {
 };
 
 /* 32-bit permutation function P used on the output of the S-boxes */
-static byte p32i[] = {
+namespace {
+	const byte p32i[] = {
 	   16,  7, 20, 21,
 	   29, 12, 28, 17,
 		1, 15, 23, 26,
@@ -223,11 +231,13 @@ static byte p32i[] = {
 	   32, 27,  3,  9,
 	   19, 13, 30,  6,
 	   22, 11,  4, 25
-};
+	};
+}
 #endif
 
 /* permuted choice table (key) */
-static const byte pc1[] = {
+namespace {
+	const byte pc1[] = {
 	   57, 49, 41, 33, 25, 17,  9,
 		1, 58, 50, 42, 34, 26, 18,
 	   10,  2, 59, 51, 43, 35, 27,
@@ -237,15 +247,19 @@ static const byte pc1[] = {
 		7, 62, 54, 46, 38, 30, 22,
 	   14,  6, 61, 53, 45, 37, 29,
 	   21, 13,  5, 28, 20, 12,  4
-};
+	};
+}
 
 /* number left rotations of pc1 */
-static const byte totrot[] = {
+namespace {
+	const byte totrot[] = {
 	   1,2,4,6,8,10,12,14,15,17,19,21,23,25,27,28
-};
+	};
+}
 
 /* permuted choice key (table) */
-static const byte pc2[] = {
+namespace {
+	const byte pc2[] = {
 	   14, 17, 11, 24,  1,  5,
 		3, 28, 15,  6, 21, 10,
 	   23, 19, 12,  4, 26,  8,
@@ -254,25 +268,32 @@ static const byte pc2[] = {
 	   30, 40, 51, 45, 33, 48,
 	   44, 49, 39, 56, 34, 53,
 	   46, 42, 50, 36, 29, 32
-};
+	};
+}
 
 /* End of DES-defined tables */
 
 /* bit 0 is left-most in byte */
-static const int bytebit[] = {
+namespace {
+	const int bytebit[] = {
 	   0200,0100,040,020,010,04,02,01
-};
+	};
+}
 
 /* Set key (initialize key schedule array) */
-void RawDES::UncheckedSetKey(CipherDir dir, const byte *key, unsigned int length)
+void RawDES::RawSetKey(CipherDir dir, const byte *key)
 {
+#if (_MSC_VER >= 1600) || (__cplusplus >= 201103L)
+# define register /* Define to nothing for C++11 and above */
+#endif
+
 	SecByteBlock buffer(56+56+8);
 	byte *const pc1m=buffer;                 /* place to modify pc1 into */
 	byte *const pcr=pc1m+56;                 /* place to rotate pc1 into */
 	byte *const ks=pcr+56;
 	register int i,j,l;
 	int m;
-	
+
 	for (j=0; j<56; j++) {          /* convert pc1 to bits of key */
 		l=pc1[j]-1;             /* integer bit location  */
 		m = l & 07;             /* find bit              */
@@ -303,7 +324,7 @@ void RawDES::UncheckedSetKey(CipherDir dir, const byte *key, unsigned int length
 			| ((word32)ks[5] << 8)
 			| ((word32)ks[7]);
 	}
-	
+
 	if (dir==DECRYPTION)     // reverse key schedule order
 		for (i=0; i<16; i+=2)
 		{
@@ -345,12 +366,12 @@ void RawDES::RawProcessBlock(word32 &l_, word32 &r_) const
 	l_ = l; r_ = r;
 }
 
-void DES_EDE2::Base::UncheckedSetKey(CipherDir dir, const byte *key, unsigned int length)
+void DES_EDE2::Base::UncheckedSetKey(const byte *userKey, unsigned int length, const NameValuePairs &)
 {
 	AssertValidKeyLength(length);
 
-	m_des1.UncheckedSetKey(dir, key);
-	m_des2.UncheckedSetKey(ReverseCipherDir(dir), key+8);
+	m_des1.RawSetKey(GetCipherDirection(), userKey);
+	m_des2.RawSetKey(ReverseCipherDir(GetCipherDirection()), userKey+8);
 }
 
 void DES_EDE2::Base::ProcessAndXorBlock(const byte *inBlock, const byte *xorBlock, byte *outBlock) const
@@ -365,13 +386,13 @@ void DES_EDE2::Base::ProcessAndXorBlock(const byte *inBlock, const byte *xorBloc
 	Block::Put(xorBlock, outBlock)(r)(l);
 }
 
-void DES_EDE3::Base::UncheckedSetKey(CipherDir dir, const byte *key, unsigned int length)
+void DES_EDE3::Base::UncheckedSetKey(const byte *userKey, unsigned int length, const NameValuePairs &)
 {
 	AssertValidKeyLength(length);
 
-	m_des1.UncheckedSetKey(dir, key+(dir==ENCRYPTION?0:2*8));
-	m_des2.UncheckedSetKey(ReverseCipherDir(dir), key+8);
-	m_des3.UncheckedSetKey(dir, key+(dir==DECRYPTION?0:2*8));
+	m_des1.RawSetKey(GetCipherDirection(), userKey + (IsForwardTransformation() ? 0 : 16));
+	m_des2.RawSetKey(ReverseCipherDir(GetCipherDirection()), userKey + 8);
+	m_des3.RawSetKey(GetCipherDirection(), userKey + (IsForwardTransformation() ? 16 : 0));
 }
 
 void DES_EDE3::Base::ProcessAndXorBlock(const byte *inBlock, const byte *xorBlock, byte *outBlock) const
@@ -420,19 +441,22 @@ void DES::Base::ProcessAndXorBlock(const byte *inBlock, const byte *xorBlock, by
 	Block::Put(xorBlock, outBlock)(r)(l);
 }
 
-void DES_XEX3::Base::UncheckedSetKey(CipherDir dir, const byte *key, unsigned int length)
+void DES_XEX3::Base::UncheckedSetKey(const byte *key, unsigned int length, const NameValuePairs &)
 {
 	AssertValidKeyLength(length);
 
-	memcpy(m_x1, key+(dir==ENCRYPTION?0:2*8), BLOCKSIZE);
-	m_des.UncheckedSetKey(dir, key+8);
-	memcpy(m_x3, key+(dir==DECRYPTION?0:2*8), BLOCKSIZE);
+	if (!m_des.get())
+		m_des.reset(new DES::Encryption);
+
+	memcpy(m_x1, key + (IsForwardTransformation() ? 0 : 16), BLOCKSIZE);
+	m_des->RawSetKey(GetCipherDirection(), key + 8);
+	memcpy(m_x3, key + (IsForwardTransformation() ? 16 : 0), BLOCKSIZE);
 }
 
 void DES_XEX3::Base::ProcessAndXorBlock(const byte *inBlock, const byte *xorBlock, byte *outBlock) const
 {
 	xorbuf(outBlock, inBlock, m_x1, BLOCKSIZE);
-	m_des.ProcessAndXorBlock(outBlock, xorBlock, outBlock);
+	m_des->ProcessAndXorBlock(outBlock, xorBlock, outBlock);
 	xorbuf(outBlock, m_x3, BLOCKSIZE);
 }
 
